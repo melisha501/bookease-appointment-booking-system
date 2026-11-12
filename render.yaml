@@ -1,0 +1,45 @@
+# Render Blueprint for the BookEase backend.
+#
+# Use this file from the Render dashboard:
+#   New + -> Blueprint -> connect this repository -> Apply
+#
+# It creates one Node web service from the backend/ folder.
+# Values marked "sync: false" are secrets or environment-specific URLs and are
+# entered in the Render dashboard. They are never stored in this file.
+
+services:
+  - type: web
+    name: bookease-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: npm install --include=dev && npm run db:generate && npm run db:deploy
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.14.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: ADMIN_NOTIFICATION_EMAIL
+        sync: false
+      - key: UPLOADTHING_TOKEN
+        sync: false
