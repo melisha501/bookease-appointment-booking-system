@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Environment files (never commit real secrets)
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Build output
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+logs/
+
+# Runtime uploads (images are stored in UploadThing, not Git)
+backend/uploads/
+
+# Generated Prisma client (recreated by `npm run db:generate`)
+backend/src/generated/prisma/
+
+# Deployment provider metadata
+.vercel/
+.render/
+
+# Local AI tooling (not part of the application)
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Local caches
+*.tsbuildinfo
+.eslintcache
+.oxlintcache
