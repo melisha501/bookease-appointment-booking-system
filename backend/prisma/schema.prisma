@@ -1,0 +1,150 @@
+// Prisma schema for Appointment & Service Booking System
+// Uses Prisma 7 with prisma-client generator (output to src/generated/prisma).
+// After editing: npm run db:generate
+// Create/update DB: npm run db:migrate (dev) or npm run db:push
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum AppointmentStatus {
+  pending
+  confirmed
+  completed
+  cancelled
+  rejected
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  phone        String?
+  address      String?
+  role         Role          @default(CUSTOMER)
+  appointments Appointment[] @relation("CustomerAppointments")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Category {
+  id       String    @id @default(cuid())
+  slug     String    @unique
+  name     String
+  services Service[]
+}
+
+model Service {
+  id           String              @id @default(cuid())
+  slug         String              @unique
+  name         String
+  description  String
+  categoryId   String
+  category     Category            @relation(fields: [categoryId], references: [id])
+  priceNpr     Int                 // stored as whole NPR amount
+  durationMins Int
+  imageUrl     String?
+  benefits     String[]            @default([])
+  rating       Float               @default(5.0)
+  isActive     Boolean             @default(true)
+  specialists  SpecialistService[]
+  appointments Appointment[]
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+}
+
+model Specialist {
+  id             String                    @id @default(cuid())
+  slug           String                    @unique
+  name           String
+  title          String
+  bio            String?
+  experience     Int                       @default(0)
+  rating         Float                     @default(5.0)
+  specialty      String                    // display label, e.g. "Clinics"
+  imageUrl       String?
+  isActive       Boolean                   @default(true)
+  services       SpecialistService[]
+  schedules      WorkingHour[]
+  dateExceptions SpecialistDateException[]
+  appointments   Appointment[]
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+}
+
+// Many-to-many: which specialists can perform which services
+model SpecialistService {
+  specialistId String
+  serviceId    String
+  specialist   Specialist @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  service      Service    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([specialistId, serviceId])
+}
+
+enum ScheduleExceptionType {
+  holiday
+  unavailable
+}
+
+// Working hours per specialist (one row per specialist): weekly schedule.
+model WorkingHour {
+  id           String     @id @default(cuid())
+  specialistId String     @unique
+  specialist   Specialist @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  days         String[]   // e.g. ["Mon","Tue","Wed","Thu","Fri","Sat"]
+  startTime    String     // "09:00 AM"
+  endTime      String     // "05:00 PM"
+  breakStart   String?    // "01:00 PM"
+  breakEnd     String?    // "02:00 PM"
+  updatedAt    DateTime   @updatedAt
+}
+
+// Specific calendar dates when a specialist is unavailable (holiday or manual block).
+model SpecialistDateException {
+  id           String                @id @default(cuid())
+  specialistId String
+  specialist   Specialist            @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  date         String                // YYYY-MM-DD
+  type         ScheduleExceptionType @default(unavailable)
+  note         String?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  @@unique([specialistId, date])
+  @@index([specialistId, date])
+}
+
+model Appointment {
+  id           String            @id @default(cuid())
+  reference    String            @unique // e.g. APT-7F3KQ2
+  customerId   String?
+  customer     User?             @relation("CustomerAppointments", fields: [customerId], references: [id])
+  customerName String
+  customerEmail String
+  customerPhone String?
+  serviceId    String
+  service      Service           @relation(fields: [serviceId], references: [id])
+  specialistId String
+  specialist   Specialist        @relation(fields: [specialistId], references: [id])
+  date         String            // YYYY-MM-DD
+  time         String            // e.g. "10:00 AM"
+  status       AppointmentStatus @default(pending)
+  notes        String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([specialistId, date, time])
+  @@index([customerId])
+}
