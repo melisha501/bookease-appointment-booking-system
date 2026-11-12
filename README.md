@@ -138,7 +138,7 @@ appointment-booking-system/
 
 ### Prerequisites
 
-- Node.js 20 LTS or newer (Node 22 LTS recommended)
+- Node.js 20.19 or newer (Node 22 LTS recommended; the repository includes `.nvmrc`)
 - npm 10 or newer
 - PostgreSQL 14 or newer (local, Neon, or Supabase)
 - A Resend account for email notifications

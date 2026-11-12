@@ -28,7 +28,7 @@ You need accounts for:
 
 Install locally:
 
-- Node.js 20 LTS or newer (22 LTS recommended)
+- Node.js 20.19 or newer (22 LTS recommended)
 - Git
 - npm
 
