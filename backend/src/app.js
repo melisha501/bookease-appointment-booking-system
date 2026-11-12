@@ -70,6 +70,11 @@ app.get("/", (_req, res) => {
   res.json({ message: "Appointment & Service Booking System API" });
 });
 
+// Keep unknown routes consistent with the rest of the JSON API.
+app.use((_req, res) => {
+  res.status(404).json({ success: false, message: "Route not found." });
+});
+
 // Central error handler (keeps responses beginner-friendly JSON).
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
