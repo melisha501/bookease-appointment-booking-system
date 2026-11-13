@@ -1,6 +1,7 @@
 // Express app — routes & middleware.
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const path = require("path");
 
 const healthRoutes = require("./routes/health");
@@ -13,6 +14,41 @@ const customerRoutes = require("./routes/customers");
 const dashboardRoutes = require("./routes/dashboard");
 
 const app = express();
+
+// Render (and most PaaS hosts) terminate TLS at a single reverse proxy, so the
+// client IP is in the first X-Forwarded-For entry. Trusting exactly one hop
+// lets rate limiting see real client IPs. Local development trusts nothing.
+// Override with TRUST_PROXY=false|true|<number>|<preset> if the topology differs.
+function parseTrustProxy(value) {
+  if (value === undefined || String(value).trim() === "") {
+    return process.env.NODE_ENV === "production" ? 1 : false;
+  }
+  const trimmed = String(value).trim();
+  if (/^false$/i.test(trimmed)) return false;
+  if (/^true$/i.test(trimmed)) return true;
+  const hops = Number(trimmed);
+  if (Number.isInteger(hops) && hops >= 0) return hops;
+  return trimmed;
+}
+app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
+
+// Security headers. The API returns JSON (plus legacy /uploads images), so a
+// strict CSP is safe here and does not affect the separately hosted frontend.
+// UploadThing CDN images must remain embeddable cross-origin.
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+      },
+    },
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false,
+  })
+);
 
 // CORS: allow the deployed frontend plus local development.
 // FRONTEND_URL is the primary origin; CORS_ORIGINS accepts a comma-separated
