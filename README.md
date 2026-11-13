@@ -220,16 +220,24 @@ Never commit real credentials. All backend secrets belong in `backend/.env` loca
 | `DATABASE_URL` | Yes | PostgreSQL connection string | `postgresql://USER:PASSWORD@HOST:5432/DB?schema=public` |
 | `JWT_SECRET` | Yes | Signs authentication tokens; use a long random value | `openssl rand -hex 32` |
 | `JWT_EXPIRES_IN` | No | Token lifetime | `7d` |
+| `TRUST_PROXY` | No | Reverse-proxy hops trusted for client IPs; defaults to `1` in production and `false` locally | `1` |
 | `FRONTEND_URL` | Yes | Primary allowed CORS origin and default app URL | `https://your-app.vercel.app` |
 | `CORS_ORIGINS` | No | Extra comma-separated allowed origins | `https://www.yourdomain.com,https://your-app.vercel.app` |
 | `ALLOW_VERCEL_PREVIEWS` | No | Allow any `*.vercel.app` preview origin | `false` |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | No | Login/registration rate-limit window (default 15 min) | `900000` |
+| `AUTH_RATE_LIMIT_LOGIN_MAX` | No | Failed logins allowed per IP per window (default 10) | `10` |
+| `AUTH_RATE_LIMIT_REGISTER_MAX` | No | Registrations allowed per IP per window (default 5) | `5` |
 | `RESEND_API_KEY` | For email | Resend API key | `re_...` |
-| `RESEND_FROM_EMAIL` | For email | Verified sender | `BookEase <no-reply@yourdomain.com>` |
+| `RESEND_FROM_EMAIL` | Production | Verified-domain sender. Required in production; the test sender is dev-only | `BookEase <no-reply@yourdomain.com>` |
 | `ADMIN_NOTIFICATION_EMAIL` | For admin alerts | Admin inbox(es), comma-separated | `admin@yourdomain.com` |
 | `EMAIL_REPLY_TO` | No | Reply-to address | `support@yourdomain.com` |
 | `SUPPORT_EMAIL` | No | Support address in email footers | `support@yourdomain.com` |
 | `APP_NAME` | No | Brand name in emails | `BookEase` |
-| `APP_URL` | No | Base URL for email buttons; falls back to `FRONTEND_URL` | `https://your-app.vercel.app` |
+| `APP_URL` | Production | Base URL for email buttons; falls back to `FRONTEND_URL`. No localhost fallback in production | `https://your-app.vercel.app` |
+| `EMAIL_OUTBOX_MAX_ATTEMPTS` | No | Delivery attempts before an email is marked failed (default 5) | `5` |
+| `EMAIL_OUTBOX_BASE_DELAY_MS` | No | First retry delay in ms (default 60000) | `60000` |
+| `EMAIL_OUTBOX_MAX_DELAY_MS` | No | Maximum retry delay in ms (default 1 hour) | `3600000` |
+| `EMAIL_OUTBOX_STUCK_AFTER_MS` | No | Re-queue `sending` rows older than this (default 5 min) | `300000` |
 | `UPLOADTHING_TOKEN` | For images | UploadThing v7 token | `...` |
 | `UPLOADTHING_SECRET` | Alternative | Legacy UploadThing secret | `...` |
 | `UPLOADTHING_APP_ID` | Alternative | Legacy UploadThing app ID | `...` |
@@ -492,7 +500,9 @@ Resend sends:
 
 Rules:
 
-- Emails are sent only after the database write succeeds.
+- Emails are queued only after the database write succeeds.
+- Delivery uses a database-backed outbox (`EmailOutbox`): the first attempt is immediate, and temporary Resend failures are retried with exponential backoff (default 5 attempts, capped at 1 hour apart).
+- A unique idempotency key per appointment event prevents duplicate emails and duplicate appointment records.
 - Email failures are logged and never roll back a booking or status change.
 - A status email is not sent when the status did not change.
 - Missing configuration or invalid recipients are handled safely.
@@ -503,9 +513,10 @@ Configure Resend:
 1. Create an account at [resend.com](https://resend.com).
 2. Create an API key and set `RESEND_API_KEY`.
 3. Verify a sending domain, then use an address on that domain in `RESEND_FROM_EMAIL`.
-   - For initial testing, `onboarding@resend.dev` works only for the Resend account owner's email address.
+   - The shared test sender `onboarding@resend.dev` only delivers to the Resend account owner's email address. It is used automatically in development when `RESEND_FROM_EMAIL` is unset, but never in production.
 4. Set `ADMIN_NOTIFICATION_EMAIL` to the admin inbox (comma-separated for multiple recipients).
-5. Restart the backend after changing environment variables.
+5. Set `APP_URL` (or `FRONTEND_URL`) to the deployed frontend so email links do not point at localhost.
+6. Restart the backend after changing environment variables.
 
 Diagnostic command:
 
@@ -661,11 +672,12 @@ Fill these in after deployment:
 - **Render free tier cold starts.** The backend may take 30–60 seconds to respond after inactivity.
 - **Resend test mode.** `onboarding@resend.dev` only delivers to the Resend account owner until a domain is verified.
 - **UploadThing credentials are required.** Image upload endpoints return a safe `503` until valid credentials are configured.
+- **UploadThing CDN caching after deletion.** Replacing or removing an image calls `UTApi.deleteFiles`, and the UploadThing API confirms deletion. The public `*.ufs.sh` URL may still return the cached file, so immediate CDN invalidation is not guaranteed.
 - **Single daily break.** Each provider has one weekly schedule and one break interval per day; multiple shifts are not modeled.
 - **Server-local timezone.** Date/time comparisons use the backend server's local timezone. Ensure the Render service timezone matches your business timezone if it differs from UTC.
 - **JWT sessions are stateless.** There is no refresh-token rotation or server-side session revocation; logout clears the token on the client.
-- **Email is best-effort.** A Resend outage does not roll back bookings, and delivery cannot be guaranteed by the API response.
+- **Email delivery is retried, not guaranteed.** A Resend outage does not roll back bookings; failed messages are retried from the outbox and marked `failed` with an error after the retry limit. Delivery cannot be guaranteed by the API response.
 - **No payment integration.** Prices are displayed but payments are handled outside the application.
-- **No rate limiting or CAPTCHA.** Add these before exposing public registration and booking to high-traffic or abusive environments.
+- **Rate limiting, no CAPTCHA.** Login and registration are rate limited per IP. There is no CAPTCHA or account lockout, and broader abuse protection for public booking endpoints is still a deployment concern.
 - **Default seeded admin password.** `Admin@123` is for local/demo use and must be changed for production.
 - **Browser E2E is manual.** Backend tests and the API smoke test are automated; the responsive UI and route checklist in `TESTING.md` must be completed manually.

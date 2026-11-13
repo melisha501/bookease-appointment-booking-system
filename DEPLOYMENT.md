@@ -246,8 +246,9 @@ The repository includes `render.yaml`.
 | `DATABASE_URL` | Neon/Supabase connection string |
 | `FRONTEND_URL` | Your Vercel URL (you can use a temporary value now and update it after step 5) |
 | `CORS_ORIGINS` | Optional extra origins, comma-separated |
+| `APP_URL` | Deployed frontend URL used in email links (recommended; falls back to `FRONTEND_URL`) |
 | `RESEND_API_KEY` | Your Resend key |
-| `RESEND_FROM_EMAIL` | Verified sender, e.g. `BookEase <no-reply@yourdomain.com>` |
+| `RESEND_FROM_EMAIL` | Verified sender, e.g. `BookEase <no-reply@yourdomain.com>` (required in production) |
 | `ADMIN_NOTIFICATION_EMAIL` | Admin inbox(es) |
 | `UPLOADTHING_TOKEN` | UploadThing token |
 
@@ -380,26 +381,38 @@ Open the browser DevTools **Console** and **Network** tabs. There should be no C
 
 ## 6. Configure Resend (production email)
 
+The application already uses Resend and preserves the six templates (booking confirmation, admin new-booking alert, confirmed, rejected, cancelled, completed). Production requires a verified sending domain.
+
 1. Sign in to [Resend](https://resend.com).
-2. Create an API key and copy it.
-3. Add and verify your sending domain under **Domains**.
-4. Set in Render:
+2. Create a **send-only** API key and copy it (do not paste it into GitHub or screenshots).
+3. Open **Domains → Add Domain** and enter a domain you control (for example `yourdomain.com`, not a made-up domain).
+4. Add the DNS records Resend shows (typically SPF `TXT`, DKIM `TXT`, and an MX record for the return-path subdomain) at your DNS provider. Wait until Resend shows the domain as **Verified**.
+5. Set in Render:
 
 ```text
 RESEND_API_KEY=re_...
 RESEND_FROM_EMAIL=BookEase <no-reply@yourdomain.com>
 ADMIN_NOTIFICATION_EMAIL=admin@yourdomain.com
 APP_URL=https://bookease.vercel.app
+FRONTEND_URL=https://bookease.vercel.app
 SUPPORT_EMAIL=support@yourdomain.com
 ```
 
-5. Redeploy the backend.
-6. Create a test booking and confirm:
+6. Redeploy the backend.
+7. Create a test booking and confirm:
    - The customer receives a confirmation email.
    - The admin inbox receives a new-booking alert.
-7. Check Render logs for `[appointments] ... email failed` warnings.
+   - Approve, reject, cancel, and complete the appointment to exercise the other templates.
+8. Check Render logs for `[email]` or `[email-outbox]` warnings. Successful sends are recorded in the `EmailOutbox` table with `status = sent` and a Resend message ID.
 
-Test mode note: `onboarding@resend.dev` only delivers to the Resend account owner's address. Verify a domain before sending to real customers.
+Important production rules:
+
+- `RESEND_FROM_EMAIL` must be set explicitly. In production the app never falls back to `onboarding@resend.dev`.
+- `APP_URL`/`FRONTEND_URL` must be the real deployed frontend. In production the app never falls back to `localhost` in email links.
+- Temporary failures (network errors, HTTP 429, and 5xx responses) stay `pending` and are retried in the background with exponential backoff (default 5 attempts, 1 minute doubling to a 1 hour cap). Non-retryable errors (unverified sender, invalid API key, invalid recipient) are marked `failed` immediately.
+- Each appointment event has a unique idempotency key, so retries and duplicate requests do not create duplicate emails or appointments.
+
+Test mode note: `onboarding@resend.dev` only delivers to the Resend account owner's address. A Resend API "accepted" response is not proof of inbox delivery; verify the inbox manually after domain verification.
 
 ---
 
@@ -488,6 +501,11 @@ Do not report the deployment as successful until these pass.
 - [ ] Neon/Supabase credentials are stored only in Render.
 - [ ] Resend and UploadThing keys are stored only in Render.
 - [ ] `FRONTEND_URL` and `CORS_ORIGINS` contain only your real frontend origins.
+- [ ] `TRUST_PROXY=1` is set on Render so rate limiting sees real client IPs.
+- [ ] Login/registration rate limiting returns `429` after repeated failures.
+- [ ] Security headers (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, HSTS) are present on API responses.
+- [ ] `RESEND_FROM_EMAIL` uses a verified domain (not `onboarding@resend.dev`).
+- [ ] `APP_URL`/`FRONTEND_URL` point at the deployed frontend, not localhost.
 - [ ] Database migrations were applied with `prisma migrate deploy`.
 - [ ] `/api/health` returns `200` with `"database": "ok"`.
 - [ ] Protected routes return `401`/`403` without the correct token/role.
@@ -505,6 +523,9 @@ Do not report the deployment as successful until these pass.
 | `PrismaClientInitializationError` | Bad connection string or generated client missing | Verify the URL and run `npm run db:generate`; check Render build logs. |
 | Render build fails at `prisma migrate deploy` | Database not reachable from the build environment or wrong URL | Use the Neon direct connection; confirm the database allows external connections. |
 | `P2021` / table does not exist | Migrations not applied | Run `npm run db:deploy` and restart the service. |
+| Email rows stay `pending` | Resend/network temporarily unavailable | The worker retries with backoff; inspect `EmailOutbox.lastError` and Render logs. |
+| Email rows are `failed` | Unverified sender, invalid API key/recipient, or retries exhausted | Fix Resend configuration, then enqueue a new event; failed rows are not resent automatically. |
+| Replaced image still loads | UploadThing CDN cache; the provider confirmed the delete | URL invalidation is not immediate. Keep the new URL in the database and treat the old file as revoked at the API level. |
 | Emails not arriving | Missing/invalid Resend key, unverified sender, test-mode recipient | Check Render logs, verify the domain, use an allowed recipient. |
 | Image upload returns `503` | UploadThing not configured | Set `UPLOADTHING_TOKEN` in Render and redeploy. |
 | Image upload returns `502` | UploadThing rejected the request | Check file type/size (JPG/PNG/WEBP, max 4 MB) and UploadThing dashboard logs. |
