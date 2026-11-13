@@ -52,8 +52,8 @@ export default function ImageUploadField({
   const messageType = validationError ? 'error' : status.type;
 
   // When the parent clears the selected file (for example after a successful
-  // upload), reset the native input and release the preview URL. State is not
-  // changed here; rendering already falls back to the saved image URL.
+  // upload), reset the native input and release the preview URL. Rendering
+  // already falls back to the saved image URL from PostgreSQL.
   useEffect(() => {
     if (!file) {
       if (inputRef.current) inputRef.current.value = '';
@@ -253,9 +253,11 @@ export default function ImageUploadField({
           className={`mt-2 text-xs font-semibold ${
             messageType === 'error'
               ? 'text-red-600'
-              : messageType === 'success'
-                ? 'text-teal-deep'
-                : 'text-ink-soft'
+              : messageType === 'warning'
+                ? 'text-amber-700'
+                : messageType === 'success'
+                  ? 'text-teal-deep'
+                  : 'text-ink-soft'
           }`}
         >
           {message}

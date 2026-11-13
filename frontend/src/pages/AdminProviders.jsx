@@ -70,10 +70,14 @@ export default function AdminProviders() {
       );
       setForm((current) => ({ ...current, image: data?.specialist?.image || '' }));
       clearSelectedImage();
-      setImageStatus({
-        type: 'success',
-        message: 'Profile image uploaded to UploadThing and saved in PostgreSQL.',
-      });
+      setImageStatus(
+        data?.warning
+          ? { type: 'warning', message: data.warning }
+          : {
+              type: 'success',
+              message: 'Profile image uploaded to UploadThing and saved in PostgreSQL.',
+            }
+      );
       await refreshCatalog();
     } catch (e) {
       setImageStatus({
@@ -96,7 +100,14 @@ export default function AdminProviders() {
       const data = await api.del(`/specialists/${encodeURIComponent(form.id)}/image`);
       setForm((current) => ({ ...current, image: data?.specialist?.image || '' }));
       clearSelectedImage();
-      setImageStatus({ type: 'success', message: 'Image removed. Existing specialist data was preserved.' });
+      setImageStatus(
+        data?.warning
+          ? { type: 'warning', message: data.warning }
+          : {
+              type: 'success',
+              message: 'Image removed. Existing specialist data was preserved.',
+            }
+      );
       await refreshCatalog();
     } catch (e) {
       setImageStatus({ type: 'error', message: e?.message || 'Could not remove image.' });
@@ -111,6 +122,7 @@ export default function AdminProviders() {
     setImageBusy(true);
     setImageProgress(0);
     let savedRecord = null;
+    let uploadWarning = '';
     const hadFile = Boolean(imageFile);
     try {
       setImageStatus({ type: 'loading', message: editing && form.id ? 'Saving specialist…' : 'Creating specialist…' });
@@ -141,18 +153,23 @@ export default function AdminProviders() {
           setImageProgress
         );
         finalImage = imgData?.specialist?.image || finalImage;
+        uploadWarning = imgData?.warning || '';
         clearSelectedImage();
       }
       await refreshCatalog();
       setForm({ ...savedRecord, image: finalImage });
       setEditing(true);
       setNote('Specialist saved to the database.');
-      setImageStatus({
-        type: 'success',
-        message: hadFile
-          ? 'Specialist saved and image uploaded to UploadThing.'
-          : 'Specialist saved to the database.',
-      });
+      setImageStatus(
+        uploadWarning
+          ? { type: 'warning', message: uploadWarning }
+          : {
+              type: 'success',
+              message: hadFile
+                ? 'Specialist saved and image uploaded to UploadThing.'
+                : 'Specialist saved to the database.',
+            }
+      );
       window.setTimeout(() => setNote(''), 4000);
     } catch (err) {
       setImageProgress(0);
@@ -183,7 +200,7 @@ export default function AdminProviders() {
     }
     setImageStatus({ type: 'loading', message: `Deleting "${name}"…` });
     try {
-      await api.del(`/specialists/${encodeURIComponent(id)}`);
+      const data = await api.del(`/specialists/${encodeURIComponent(id)}`);
       if (editing && form.id === id) {
         setForm(EMPTY_FORM);
         setEditing(false);
@@ -191,7 +208,11 @@ export default function AdminProviders() {
       }
       await refreshCatalog();
       setNote(`"${name}" was deleted.`);
-      setImageStatus({ type: 'success', message: 'Specialist deleted from the database.' });
+      setImageStatus(
+        data?.warning
+          ? { type: 'warning', message: data.warning }
+          : { type: 'success', message: 'Specialist deleted from the database.' }
+      );
       window.setTimeout(() => setNote(''), 4000);
       window.setTimeout(() => setImageStatus((s) => (s.type === 'success' ? { type: '', message: '' } : s)), 4000);
     } catch (err) {

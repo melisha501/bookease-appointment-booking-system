@@ -74,10 +74,14 @@ export default function AdminServices() {
       const url = data?.service?.image || '';
       setForm((current) => ({ ...current, image: url }));
       clearSelectedImage();
-      setImageStatus({
-        type: 'success',
-        message: 'Image uploaded to UploadThing and saved in PostgreSQL.',
-      });
+      setImageStatus(
+        data?.warning
+          ? { type: 'warning', message: data.warning }
+          : {
+              type: 'success',
+              message: 'Image uploaded to UploadThing and saved in PostgreSQL.',
+            }
+      );
       await refreshCatalog();
     } catch (e) {
       setImageStatus({
@@ -100,7 +104,14 @@ export default function AdminServices() {
       const data = await api.del(`/services/${encodeURIComponent(form.id)}/image`);
       setForm((current) => ({ ...current, image: data?.service?.image || '' }));
       clearSelectedImage();
-      setImageStatus({ type: 'success', message: 'Image removed. Existing service data was preserved.' });
+      setImageStatus(
+        data?.warning
+          ? { type: 'warning', message: data.warning }
+          : {
+              type: 'success',
+              message: 'Image removed. Existing service data was preserved.',
+            }
+      );
       await refreshCatalog();
     } catch (e) {
       setImageStatus({ type: 'error', message: e?.message || 'Could not remove image.' });
@@ -116,6 +127,7 @@ export default function AdminServices() {
     setImageBusy(true);
     setImageProgress(0);
     let savedRecord = null;
+    let uploadWarning = '';
     const hadFile = Boolean(imageFile);
     try {
       setImageStatus({ type: 'loading', message: editing && form.id ? 'Saving service…' : 'Creating service…' });
@@ -149,6 +161,7 @@ export default function AdminServices() {
           setImageProgress
         );
         finalImage = imgData?.service?.image || finalImage;
+        uploadWarning = imgData?.warning || '';
         clearSelectedImage();
       }
 
@@ -156,12 +169,16 @@ export default function AdminServices() {
       setForm({ ...savedRecord, image: finalImage });
       setEditing(true);
       setNote('Service saved to the database.');
-      setImageStatus({
-        type: 'success',
-        message: hadFile
-          ? 'Service saved and image uploaded to UploadThing.'
-          : 'Service saved to the database.',
-      });
+      setImageStatus(
+        uploadWarning
+          ? { type: 'warning', message: uploadWarning }
+          : {
+              type: 'success',
+              message: hadFile
+                ? 'Service saved and image uploaded to UploadThing.'
+                : 'Service saved to the database.',
+            }
+      );
       window.setTimeout(() => setNote(''), 4000);
     } catch (err) {
       setImageProgress(0);
@@ -199,7 +216,7 @@ export default function AdminServices() {
     }
     setImageStatus({ type: 'loading', message: `Deleting "${name}"…` });
     try {
-      await api.del(`/services/${encodeURIComponent(id)}`);
+      const data = await api.del(`/services/${encodeURIComponent(id)}`);
       if (editing && form.id === id) {
         setForm(EMPTY_FORM);
         setEditing(false);
@@ -207,7 +224,11 @@ export default function AdminServices() {
       }
       await refreshCatalog();
       setNote(`"${name}" was deleted.`);
-      setImageStatus({ type: 'success', message: 'Service deleted from the database.' });
+      setImageStatus(
+        data?.warning
+          ? { type: 'warning', message: data.warning }
+          : { type: 'success', message: 'Service deleted from the database.' }
+      );
       window.setTimeout(() => setNote(''), 4000);
       window.setTimeout(() => setImageStatus((s) => (s.type === 'success' ? { type: '', message: '' } : s)), 4000);
     } catch (err) {
@@ -238,7 +259,21 @@ export default function AdminServices() {
             <tbody>
               {services.map((s) => (
                 <tr key={s.id} className="border-b border-line last:border-0 hover:bg-surface">
-                  <td className="px-5 py-3.5"><p className="font-bold text-ink">{s.name}</p><p className="text-xs text-ink-soft">★ {s.rating}</p></td>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-3">
+                      {s.image ? (
+                        <img src={s.image} alt={s.name} className="h-10 w-10 shrink-0 rounded-lg border border-line object-cover" />
+                      ) : (
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-dashed border-line bg-white text-xs font-semibold text-ink-soft">
+                          {(s.name || '?').slice(0, 1)}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-bold text-ink">{s.name}</p>
+                        <p className="text-xs text-ink-soft">★ {s.rating}</p>
+                      </div>
+                    </div>
+                  </td>
                   <td className="px-5 py-3.5"><Badge>{s.categoryName}</Badge></td>
                   <td className="px-5 py-3.5 font-bold text-teal-deep">{s.price}</td>
                   <td className="px-5 py-3.5 text-ink-soft">{s.duration} mins</td>

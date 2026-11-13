@@ -87,6 +87,11 @@ async function main() {
   console.log("Upload succeeded.");
   console.log(`  URL : ${result.url}`);
   console.log(`  key : ${result.key || "(not returned)"}`);
+
+  // The UploadThing SDK keeps internal handles open, which would otherwise
+  // leave this command hanging after a successful upload. Flush stdout, then
+  // exit explicitly so the diagnostic terminates.
+  process.stdout.write("", () => process.exit(0));
 }
 
 main().catch((err) => {

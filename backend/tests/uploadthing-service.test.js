@@ -282,3 +282,173 @@ test("getUploadThingConfig reports configuration sources without exposing the to
     svc.restore();
   }
 });
+
+test("extractUploadThingKey reads official URLs and rejects anything unsafe", () => {
+  const svc = loadUploadService({ env: {} });
+  try {
+    assert.equal(svc.extractUploadThingKey("https://utfs.io/f/2e0fdb64_image.jpg"), "2e0fdb64_image.jpg");
+    assert.equal(
+      svc.extractUploadThingKey("https://myapp.ufs.sh/f/1649353b_image2.jpg?foo=1"),
+      "1649353b_image2.jpg"
+    );
+    assert.equal(
+      svc.extractUploadThingKey("https://myapp.ufs.sh/f/key%20with%20space.png"),
+      "key with space.png"
+    );
+
+    assert.equal(svc.extractUploadThingKey(null), null);
+    assert.equal(svc.extractUploadThingKey(""), null);
+    assert.equal(svc.extractUploadThingKey("not a url"), null);
+    assert.equal(svc.extractUploadThingKey("https://images.unsplash.com/photo-123"), null);
+    assert.equal(svc.extractUploadThingKey("https://evil.example/f/key.png"), null);
+    assert.equal(svc.extractUploadThingKey("https://myapp.ufs.sh/f/a/extra.png"), null);
+    assert.equal(svc.extractUploadThingKey("https://myapp.ufs.sh/f/..%2Fescape.png"), null);
+  } finally {
+    svc.restore();
+  }
+});
+
+test("deleteImageFromUploadThing returns 503 when credentials are missing", async () => {
+  class UTApiMock {
+    async deleteFiles() {
+      throw new Error("should not call");
+    }
+  }
+  const svc = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: class {} },
+    env: {},
+  });
+  try {
+    const result = await svc.deleteImageFromUploadThing("https://utfs.io/f/test-key.png");
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 503);
+    assert.match(result.message, /UPLOADTHING_SECRET/i);
+  } finally {
+    svc.restore();
+  }
+});
+
+test("deleteImageFromUploadThing deletes only the extracted key via UTApi", async () => {
+  let seen;
+  class UTApiMock {
+    constructor(opts) {
+      this.opts = opts;
+    }
+    async deleteFiles(key) {
+      seen = { key, token: this.opts.token };
+      return { success: true, deletedCount: 1 };
+    }
+  }
+  const token = legacyToken("ut_secret_test", "ut_app_test");
+  const svc = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: class {} },
+    env: { UPLOADTHING_TOKEN: token },
+  });
+  try {
+    const result = await svc.deleteImageFromUploadThing(
+      "https://myapp.ufs.sh/f/2e0fdb64_image.jpg"
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.deleted, true);
+    assert.equal(result.key, "2e0fdb64_image.jpg");
+    assert.equal(seen.key, "2e0fdb64_image.jpg");
+    assert.equal(seen.token, token);
+  } finally {
+    svc.restore();
+  }
+});
+
+test("deleteImageFromUploadThing skips external and missing URLs without calling the SDK", async () => {
+  let called = false;
+  class UTApiMock {
+    async deleteFiles() {
+      called = true;
+      return { success: true, deletedCount: 1 };
+    }
+  }
+  const svc = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: class {} },
+    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+  });
+  try {
+    const external = await svc.deleteImageFromUploadThing("https://images.unsplash.com/photo-123");
+    assert.equal(external.ok, true);
+    assert.equal(external.deleted, false);
+    assert.equal(external.skipped, true);
+    assert.equal(external.reason, "external-url");
+
+    const missing = await svc.deleteImageFromUploadThing(null);
+    assert.equal(missing.ok, true);
+    assert.equal(missing.skipped, true);
+    assert.equal(missing.reason, "missing-url");
+
+    const invalid = await svc.deleteImageFromUploadThing("https://myapp.ufs.sh/not-a-file");
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.reason, "unsupported-path");
+
+    assert.equal(called, false);
+  } finally {
+    svc.restore();
+  }
+});
+
+test("deleteImageFromUploadThing reports already-missing files honestly", async () => {
+  class UTApiMock {
+    async deleteFiles() {
+      return { success: true, deletedCount: 0 };
+    }
+  }
+  const svc = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: class {} },
+    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+  });
+  try {
+    const result = await svc.deleteImageFromUploadThing("https://utfs.io/f/already-gone.png");
+    assert.equal(result.ok, true);
+    assert.equal(result.deleted, false);
+    assert.equal(result.notFound, true);
+    assert.match(result.message, /not found/i);
+  } finally {
+    svc.restore();
+  }
+});
+
+test("deleteImageFromUploadThing handles provider refusal and thrown errors safely", async () => {
+  class RefusingUTApi {
+    async deleteFiles() {
+      return { success: false, deletedCount: 0 };
+    }
+  }
+  const refused = loadUploadService({
+    uploadthingServerModule: { UTApi: RefusingUTApi, UTFile: class {} },
+    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+  });
+  try {
+    const result = await refused.deleteImageFromUploadThing("https://utfs.io/f/test-key.png");
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 502);
+    assert.match(result.message, /did not confirm deletion/i);
+  } finally {
+    refused.restore();
+  }
+
+  class ThrowingUTApi {
+    async deleteFiles() {
+      throw new Error("network down: secret-value-should-not-leak");
+    }
+  }
+  const thrown = loadUploadService({
+    uploadthingServerModule: { UTApi: ThrowingUTApi, UTFile: class {} },
+    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+  });
+  try {
+    const result = await thrown.deleteImageFromUploadThing("https://utfs.io/f/test-key.png");
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 502);
+    assert.match(result.message, /Image deletion failed/i);
+    assert.doesNotMatch(result.message, /secret-value-should-not-leak/);
+    assert.doesNotMatch(result.message, /ut_secret_test/);
+  } finally {
+    thrown.restore();
+  }
+});

@@ -2,7 +2,11 @@
 // Responses are shaped to be easy for the frontend to consume.
 
 const prisma = require("../lib/prisma");
-const { uploadImageToUploadThing } = require("../services/uploadthingService");
+const {
+  uploadImageToUploadThing,
+  deleteImageFromUploadThing,
+  parseUploadThingImageUrl,
+} = require("../services/uploadthingService");
 
 function formatNpr(amount) {
   const n = Number(amount) || 0;
@@ -354,24 +358,160 @@ async function resolveCategoryId(key) {
   return cat?.id || null;
 }
 
+// Counts database records that still reference an image URL. The Category model
+// in the current schema has no image column, so only Service and Specialist are
+// checked. If a category image column is added later, include it here before
+// deleting any cloud file.
+async function countImageReferences(imageUrl) {
+  const where = { imageUrl };
+  const checks = [];
+  if (prisma.service && typeof prisma.service.count === "function") {
+    checks.push(prisma.service.count({ where }));
+  }
+  if (prisma.specialist && typeof prisma.specialist.count === "function") {
+    checks.push(prisma.specialist.count({ where }));
+  }
+  if (checks.length === 0) {
+    throw new Error("No image reference checks are available.");
+  }
+  const counts = await Promise.all(checks);
+  return counts.reduce((total, count) => total + (Number(count) || 0), 0);
+}
+
+// Deletes an old image from UploadThing only after the database has been
+// updated/deleted successfully and only when no other record still uses it.
+// Missing, invalid, and non-UploadThing URLs are skipped without touching the
+// cloud. An UploadThing URL whose file key cannot be parsed is reported as a
+// failure instead of being silently ignored, so a leaked file is visible.
+async function cleanupUnusedImage(imageUrl) {
+  if (!imageUrl) return { status: "none" };
+
+  const parsed =
+    typeof parseUploadThingImageUrl === "function" ? parseUploadThingImageUrl(imageUrl) : null;
+
+  if (!parsed || !parsed.ok) {
+    const reason = parsed ? parsed.reason : "unknown";
+    if (
+      !parsed ||
+      reason === "missing-url" ||
+      reason === "external-url" ||
+      reason === "invalid-url"
+    ) {
+      return { status: "skipped", reason: "not-uploadthing" };
+    }
+    return {
+      status: "failed",
+      statusCode: 422,
+      message:
+        "The stored image URL is an UploadThing URL, but its file key could not be determined safely. " +
+        "The cloud file was not deleted; check the UploadThing dashboard and the stored URL.",
+    };
+  }
+
+  try {
+    const referenceCount = await countImageReferences(imageUrl);
+    if (referenceCount > 0) {
+      return { status: "skipped", reason: "still-referenced", referenceCount };
+    }
+
+    const result = await deleteImageFromUploadThing(imageUrl);
+    if (result && result.ok && result.deleted) {
+      return { status: "deleted", key: result.key };
+    }
+    if (result && result.ok && result.skipped) {
+      return { status: "skipped", reason: result.reason || "not-uploadthing" };
+    }
+    if (result && result.ok && result.notFound) {
+      return { status: "not-found", key: result.key, message: result.message };
+    }
+    return {
+      status: "failed",
+      statusCode: result?.status,
+      message: (result && result.message) || "The image could not be removed from UploadThing.",
+    };
+  } catch (err) {
+    console.error(
+      "[image-cleanup] Could not remove unused image:",
+      (err && (err.code || err.name)) || "Unknown error"
+    );
+    return {
+      status: "failed",
+      reason: "unexpected-error",
+      message:
+        "The image could not be removed from UploadThing because an unexpected error occurred.",
+    };
+  }
+}
+
+// Removes a file that was just uploaded but could not be saved to PostgreSQL,
+// so a failed database update does not leave an orphan in cloud storage.
+async function discardNewUpload(imageUrl) {
+  if (!imageUrl || typeof deleteImageFromUploadThing !== "function") return;
+  try {
+    const result = await deleteImageFromUploadThing(imageUrl);
+    if (!result || !result.ok || (!result.deleted && !result.skipped)) {
+      console.error(
+        "[image-cleanup] A newly uploaded image could not be removed after a database error. " +
+          "Check the UploadThing dashboard for an orphaned file."
+      );
+    }
+  } catch (err) {
+    console.error(
+      "[image-cleanup] A newly uploaded image could not be removed after a database error:",
+      (err && (err.code || err.name)) || "Unknown error"
+    );
+  }
+}
+
+function withImageCleanup(payload, cleanup, action) {
+  if (!cleanup || cleanup.status === "none") return payload;
+  payload.imageCleanup = cleanup;
+  if (cleanup.status === "failed") {
+    payload.warning = `${action}, but the image could not be removed from UploadThing. ${
+      cleanup.message || ""
+    } Check the UploadThing dashboard and remove the file manually if needed.`
+      .replace(/\s+/g, " ")
+      .trim();
+  } else if (cleanup.status === "not-found") {
+    payload.warning = `${action}, but UploadThing reported that the image was not found (it may already have been deleted).`;
+  }
+  return payload;
+}
+
 async function uploadServiceImage(req, res, next) {
   try {
     const service = await findServiceByKey(req.params.id);
     if (!service) return res.status(404).json({ success: false, message: "Service not found." });
 
+    const previousImageUrl = service.imageUrl || null;
     const upload = await uploadImageToUploadThing(req.file);
     if (!upload.ok) return res.status(upload.status || 400).json({ success: false, message: upload.message });
 
-    const updated = await prisma.service.update({
-      where: { id: service.id },
-      data: { imageUrl: upload.url },
-      include: { category: true },
-    });
-    res.json({
+    let updated;
+    try {
+      updated = await prisma.service.update({
+        where: { id: service.id },
+        data: { imageUrl: upload.url },
+        include: { category: true },
+      });
+    } catch (err) {
+      // The database still points at the old image; remove the new orphan file.
+      await discardNewUpload(upload.url);
+      throw err;
+    }
+
+    const cleanup =
+      previousImageUrl && previousImageUrl !== upload.url
+        ? await cleanupUnusedImage(previousImageUrl)
+        : { status: "none" };
+
+    const payload = {
       success: true,
       message: "Service image updated.",
       service: serviceToClient(updated),
-    });
+    };
+    withImageCleanup(payload, cleanup, "Service image was updated");
+    res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -382,19 +522,35 @@ async function uploadSpecialistImage(req, res, next) {
     const specialist = await findSpecialistByKey(req.params.id);
     if (!specialist) return res.status(404).json({ success: false, message: "Specialist not found." });
 
+    const previousImageUrl = specialist.imageUrl || null;
     const upload = await uploadImageToUploadThing(req.file);
     if (!upload.ok) return res.status(upload.status || 400).json({ success: false, message: upload.message });
 
-    const updated = await prisma.specialist.update({
-      where: { id: specialist.id },
-      data: { imageUrl: upload.url },
-      include: { schedules: true, services: { include: { service: { select: { slug: true, isActive: true } } } } },
-    });
-    res.json({
+    let updated;
+    try {
+      updated = await prisma.specialist.update({
+        where: { id: specialist.id },
+        data: { imageUrl: upload.url },
+        include: { schedules: true, services: { include: { service: { select: { slug: true, isActive: true } } } } },
+      });
+    } catch (err) {
+      // The database still points at the old image; remove the new orphan file.
+      await discardNewUpload(upload.url);
+      throw err;
+    }
+
+    const cleanup =
+      previousImageUrl && previousImageUrl !== upload.url
+        ? await cleanupUnusedImage(previousImageUrl)
+        : { status: "none" };
+
+    const payload = {
       success: true,
       message: "Specialist image updated.",
       specialist: specialistToClient(updated, true),
-    });
+    };
+    withImageCleanup(payload, cleanup, "Specialist image was updated");
+    res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -404,12 +560,22 @@ async function removeServiceImage(req, res, next) {
   try {
     const service = await findServiceByKey(req.params.id);
     if (!service) return res.status(404).json({ success: false, message: "Service not found." });
+
+    const previousImageUrl = service.imageUrl || null;
     const updated = await prisma.service.update({
       where: { id: service.id },
-      data: { imageUrl: null }, // remove reference only; record preserved
+      data: { imageUrl: null }, // remove the database reference; the record is preserved
       include: { category: true },
     });
-    res.json({ success: true, message: "Service image removed.", service: serviceToClient(updated) });
+
+    const cleanup = await cleanupUnusedImage(previousImageUrl);
+    const payload = {
+      success: true,
+      message: "Service image removed.",
+      service: serviceToClient(updated),
+    };
+    withImageCleanup(payload, cleanup, "Service image was removed");
+    res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -419,12 +585,22 @@ async function removeSpecialistImage(req, res, next) {
   try {
     const specialist = await findSpecialistByKey(req.params.id);
     if (!specialist) return res.status(404).json({ success: false, message: "Specialist not found." });
+
+    const previousImageUrl = specialist.imageUrl || null;
     const updated = await prisma.specialist.update({
       where: { id: specialist.id },
-      data: { imageUrl: null }, // remove reference only; record preserved
+      data: { imageUrl: null }, // remove the database reference; the record is preserved
       include: { schedules: true, services: { include: { service: { select: { slug: true, isActive: true } } } } },
     });
-    res.json({ success: true, message: "Specialist image removed.", specialist: specialistToClient(updated, true) });
+
+    const cleanup = await cleanupUnusedImage(previousImageUrl);
+    const payload = {
+      success: true,
+      message: "Specialist image removed.",
+      specialist: specialistToClient(updated, true),
+    };
+    withImageCleanup(payload, cleanup, "Specialist image was removed");
+    res.json(payload);
   } catch (err) {
     next(err);
   }
@@ -449,7 +625,10 @@ async function deleteService(req, res, next) {
     }
 
     await prisma.service.delete({ where: { id: service.id } }); // cascades SpecialistService joins
-    res.json({ success: true, message: "Service deleted.", id: service.slug || service.id });
+    const cleanup = await cleanupUnusedImage(service.imageUrl || null);
+    const payload = { success: true, message: "Service deleted.", id: service.slug || service.id };
+    withImageCleanup(payload, cleanup, "Service was deleted");
+    res.json(payload);
   } catch (err) {
     if (err && err.code === "P2003") {
       return res.status(409).json({
@@ -483,7 +662,14 @@ async function deleteSpecialist(req, res, next) {
     }
 
     await prisma.specialist.delete({ where: { id: specialist.id } }); // cascades WorkingHour/SpecialistService
-    res.json({ success: true, message: "Specialist deleted.", id: specialist.slug || specialist.id });
+    const cleanup = await cleanupUnusedImage(specialist.imageUrl || null);
+    const payload = {
+      success: true,
+      message: "Specialist deleted.",
+      id: specialist.slug || specialist.id,
+    };
+    withImageCleanup(payload, cleanup, "Specialist was deleted");
+    res.json(payload);
   } catch (err) {
     if (err && err.code === "P2003") {
       return res.status(409).json({

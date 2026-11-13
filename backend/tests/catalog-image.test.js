@@ -5,7 +5,36 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-function freshController({ prisma, upload }) {
+function defaultParseUploadThingImageUrl(imageUrl) {
+  if (typeof imageUrl !== "string" || !imageUrl) return { ok: false, reason: "missing-url" };
+  let parsed;
+  try {
+    parsed = new URL(imageUrl);
+  } catch {
+    return { ok: false, reason: "invalid-url" };
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return { ok: false, reason: "invalid-url" };
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!(host === "utfs.io" || host === "ufs.sh" || host.endsWith(".ufs.sh"))) {
+    return { ok: false, reason: "external-url", host };
+  }
+  const match = /^\/f\/([^/]+)$/.exec(parsed.pathname);
+  if (!match) return { ok: false, reason: "unsupported-path", host };
+  try {
+    return { ok: true, key: decodeURIComponent(match[1]), host };
+  } catch {
+    return { ok: false, reason: "invalid-key", host };
+  }
+}
+
+function freshController({
+  prisma,
+  upload,
+  removeImage = async () => ({ ok: true, deleted: true, key: "deleted-key" }),
+  parseUrl = defaultParseUploadThingImageUrl,
+}) {
   process.env.DATABASE_URL =
     process.env.DATABASE_URL || "postgresql://user:pass@localhost:5432/testdb";
 
@@ -27,6 +56,8 @@ function freshController({ prisma, upload }) {
     exports: {
       imageUploadMiddleware: (_req, _res, next) => next(),
       uploadImageToUploadThing: upload,
+      deleteImageFromUploadThing: removeImage,
+      parseUploadThingImageUrl: parseUrl,
     },
   };
 
@@ -239,4 +270,363 @@ test("updateSpecialist does not clear an existing image when editing other field
   assert.equal(updateArgs.data.title, "Lead Stylist");
   assert.equal(Object.prototype.hasOwnProperty.call(updateArgs.data, "imageUrl"), false);
   assert.equal(res.body.specialist.image, "https://old.example/avatar.png");
+});
+
+test("deleteService deletes the database row before deleting its unused UploadThing image", async () => {
+  const calls = [];
+  const prisma = {
+    service: {
+      findFirst: async () => serviceRow({ imageUrl: "https://app.ufs.sh/f/svc-key.png" }),
+      count: async () => 0,
+      delete: async () => {
+        calls.push("service.delete");
+      },
+    },
+    specialist: { count: async () => 0 },
+    appointment: { count: async () => 0 },
+  };
+
+  let deletedUrl;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async (url) => {
+      assert.deepEqual(calls, ["service.delete"], "cloud deletion must happen after DB deletion");
+      deletedUrl = url;
+      return { ok: true, deleted: true, key: "svc-key.png" };
+    },
+  });
+
+  const res = mockRes();
+  await controller.deleteService({ params: { id: "haircut" } }, res, (err) => {
+    throw err;
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.message, "Service deleted.");
+  assert.equal(deletedUrl, "https://app.ufs.sh/f/svc-key.png");
+  assert.equal(res.body.imageCleanup.status, "deleted");
+  assert.equal(res.body.warning, undefined);
+});
+
+test("deleteSpecialist deletes the database row before deleting its unused UploadThing image", async () => {
+  const calls = [];
+  const prisma = {
+    specialist: {
+      findFirst: async () => specialistRow({ imageUrl: "https://app.ufs.sh/f/sp-key.png" }),
+      count: async () => 0,
+      delete: async () => {
+        calls.push("specialist.delete");
+      },
+    },
+    service: { count: async () => 0 },
+    appointment: { count: async () => 0 },
+  };
+
+  let deletedUrl;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async (url) => {
+      assert.deepEqual(calls, ["specialist.delete"], "cloud deletion must happen after DB deletion");
+      deletedUrl = url;
+      return { ok: true, deleted: true, key: "sp-key.png" };
+    },
+  });
+
+  const res = mockRes();
+  await controller.deleteSpecialist({ params: { id: "sita-sharma" } }, res, (err) => {
+    throw err;
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.success, true);
+  assert.equal(deletedUrl, "https://app.ufs.sh/f/sp-key.png");
+  assert.equal(res.body.imageCleanup.status, "deleted");
+});
+
+test("cloud files still referenced by another record are never deleted", async () => {
+  const prisma = {
+    service: {
+      findFirst: async () => serviceRow({ imageUrl: "https://app.ufs.sh/f/shared-key.png" }),
+      count: async () => 0,
+      delete: async () => {},
+    },
+    specialist: { count: async () => 1 },
+    appointment: { count: async () => 0 },
+  };
+
+  let deleteCalled = false;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async () => {
+      deleteCalled = true;
+      return { ok: true, deleted: true };
+    },
+  });
+
+  const res = mockRes();
+  await controller.deleteService({ params: { id: "haircut" } }, res, (err) => {
+    throw err;
+  });
+
+  assert.equal(deleteCalled, false);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.imageCleanup.status, "skipped");
+  assert.equal(res.body.imageCleanup.reason, "still-referenced");
+  assert.equal(res.body.imageCleanup.referenceCount, 1);
+});
+
+test("a failed cloud deletion is reported as a warning after the database row is deleted", async () => {
+  const prisma = {
+    service: {
+      findFirst: async () => serviceRow({ imageUrl: "https://app.ufs.sh/f/svc-key.png" }),
+      count: async () => 0,
+      delete: async () => {},
+    },
+    specialist: { count: async () => 0 },
+    appointment: { count: async () => 0 },
+  };
+
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async () => ({
+      ok: false,
+      status: 502,
+      message: "Image deletion failed. The file may still exist in UploadThing.",
+    }),
+  });
+
+  const res = mockRes();
+  await controller.deleteService({ params: { id: "haircut" } }, res, (err) => {
+    throw err;
+  });
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.message, "Service deleted.");
+  assert.equal(res.body.imageCleanup.status, "failed");
+  assert.match(res.body.warning, /could not be removed from UploadThing/i);
+  assert.match(res.body.warning, /uploadthing dashboard/i);
+});
+
+test("a failed database delete does not delete the cloud image", async () => {
+  const prisma = {
+    service: {
+      findFirst: async () => serviceRow({ imageUrl: "https://app.ufs.sh/f/svc-key.png" }),
+      count: async () => 0,
+      delete: async () => {
+        const err = new Error("database unavailable");
+        err.code = "DB_DOWN";
+        throw err;
+      },
+    },
+    specialist: { count: async () => 0 },
+    appointment: { count: async () => 0 },
+  };
+
+  let deleteCalled = false;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async () => {
+      deleteCalled = true;
+      return { ok: true, deleted: true };
+    },
+  });
+
+  let nextError;
+  const res = mockRes();
+  await controller.deleteService({ params: { id: "haircut" } }, res, (err) => {
+    nextError = err;
+  });
+
+  assert.equal(deleteCalled, false);
+  assert.equal(nextError.message, "database unavailable");
+});
+
+test("removeServiceImage clears the database reference and then deletes the cloud file", async () => {
+  let updated = false;
+  let updateArgs;
+  const prisma = {
+    service: {
+      findFirst: async () => serviceRow({ imageUrl: "https://app.ufs.sh/f/old-svc.png" }),
+      update: async (args) => {
+        updateArgs = args;
+        updated = true;
+        return serviceRow({ imageUrl: null });
+      },
+      count: async () => 0,
+    },
+    specialist: { count: async () => 0 },
+  };
+
+  let deletedUrl;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async (url) => {
+      assert.equal(updated, true, "cloud deletion must happen after the DB update");
+      deletedUrl = url;
+      return { ok: true, deleted: true, key: "old-svc.png" };
+    },
+  });
+
+  const res = mockRes();
+  await controller.removeServiceImage({ params: { id: "haircut" } }, res, (err) => {
+    throw err;
+  });
+
+  assert.equal(res.body.success, true);
+  assert.equal(updateArgs.data.imageUrl, null);
+  assert.equal(res.body.service.image, "");
+  assert.equal(deletedUrl, "https://app.ufs.sh/f/old-svc.png");
+  assert.equal(res.body.imageCleanup.status, "deleted");
+});
+
+test("replacing a service image deletes the previous cloud file after the DB update", async () => {
+  let updated = false;
+  const prisma = {
+    service: {
+      findFirst: async () => serviceRow({ imageUrl: "https://app.ufs.sh/f/old-svc.png" }),
+      update: async (args) => {
+        updated = true;
+        return serviceRow({ imageUrl: args.data.imageUrl });
+      },
+      count: async () => 0,
+    },
+    specialist: { count: async () => 0 },
+  };
+
+  let deletedUrl;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: true, url: "https://app.ufs.sh/f/new-svc.png" }),
+    removeImage: async (url) => {
+      assert.equal(updated, true, "cloud deletion must happen after the DB update");
+      deletedUrl = url;
+      return { ok: true, deleted: true, key: "old-svc.png" };
+    },
+  });
+
+  const res = mockRes();
+  await controller.uploadServiceImage(
+    { params: { id: "haircut" }, file: { originalname: "new.png" } },
+    res,
+    (err) => {
+      throw err;
+    }
+  );
+
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.service.image, "https://app.ufs.sh/f/new-svc.png");
+  assert.equal(deletedUrl, "https://app.ufs.sh/f/old-svc.png");
+  assert.equal(res.body.imageCleanup.status, "deleted");
+});
+
+test("a newly uploaded image is removed when saving its URL to PostgreSQL fails", async () => {
+  const prisma = {
+    service: {
+      findFirst: async () => serviceRow({ imageUrl: "https://app.ufs.sh/f/old-svc.png" }),
+      update: async () => {
+        const err = new Error("database write failed");
+        err.code = "DB_DOWN";
+        throw err;
+      },
+      count: async () => 0,
+    },
+    specialist: { count: async () => 0 },
+  };
+
+  let deletedUrl;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: true, url: "https://app.ufs.sh/f/new-orphan.png" }),
+    removeImage: async (url) => {
+      deletedUrl = url;
+      return { ok: true, deleted: true, key: "new-orphan.png" };
+    },
+  });
+
+  let nextError;
+  const res = mockRes();
+  await controller.uploadServiceImage(
+    { params: { id: "haircut" }, file: { originalname: "new.png" } },
+    res,
+    (err) => {
+      nextError = err;
+    }
+  );
+
+  assert.equal(nextError.message, "database write failed");
+  assert.equal(deletedUrl, "https://app.ufs.sh/f/new-orphan.png");
+});
+
+test("externally hosted images are never sent to UploadThing deletion", async () => {
+  const prisma = {
+    service: {
+      findFirst: async () =>
+        serviceRow({ imageUrl: "https://images.unsplash.com/photo-1631217868264" }),
+      count: async () => 0,
+      delete: async () => {},
+    },
+    specialist: { count: async () => 0 },
+    appointment: { count: async () => 0 },
+  };
+
+  let deleteCalled = false;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async () => {
+      deleteCalled = true;
+      return { ok: true, deleted: true };
+    },
+  });
+
+  const res = mockRes();
+  await controller.deleteService({ params: { id: "haircut" } }, res, (err) => {
+    throw err;
+  });
+
+  assert.equal(deleteCalled, false);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.imageCleanup.status, "skipped");
+  assert.equal(res.body.imageCleanup.reason, "not-uploadthing");
+});
+
+test("an unparseable UploadThing URL is reported instead of silently skipped", async () => {
+  const prisma = {
+    service: {
+      findFirst: async () =>
+        serviceRow({ imageUrl: "https://app.ufs.sh/f/some/nested/path.png" }),
+      count: async () => 0,
+      delete: async () => {},
+    },
+    specialist: { count: async () => 0 },
+    appointment: { count: async () => 0 },
+  };
+
+  let deleteCalled = false;
+  const controller = freshController({
+    prisma,
+    upload: async () => ({ ok: false, status: 500, message: "unused" }),
+    removeImage: async () => {
+      deleteCalled = true;
+      return { ok: true, deleted: true };
+    },
+  });
+
+  const res = mockRes();
+  await controller.deleteService({ params: { id: "haircut" } }, res, (err) => {
+    throw err;
+  });
+
+  assert.equal(deleteCalled, false);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.message, "Service deleted.");
+  assert.equal(res.body.imageCleanup.status, "failed");
+  assert.match(res.body.warning, /file key could not be determined safely/i);
 });

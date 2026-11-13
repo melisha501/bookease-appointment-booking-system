@@ -40,9 +40,13 @@ export default function AdminCategories() {
     setBusy(true);
     setStatus({ type: 'loading', message: `Deleting "${category.name}"…` });
     try {
-      await api.del(`/categories/${encodeURIComponent(category.slug || category.id)}`);
+      const data = await api.del(`/categories/${encodeURIComponent(category.slug || category.id)}`);
       await refreshCatalog();
-      setStatus({ type: 'success', message: 'Category deleted from the database.' });
+      setStatus(
+        data?.warning
+          ? { type: 'warning', message: data.warning }
+          : { type: 'success', message: 'Category deleted from the database.' }
+      );
       window.setTimeout(() => setStatus((s) => (s.type === 'success' ? { type: '', message: '' } : s)), 4000);
     } catch (err) {
       setStatus({ type: 'error', message: err?.message || 'Could not delete category.' });
@@ -57,7 +61,7 @@ export default function AdminCategories() {
         <div className="px-5 py-4">
           <h3 className="text-base font-bold text-ink">All Categories ({categories.length})</h3>
           {status.message ? (
-            <p role="status" className={`mt-1 text-xs font-semibold ${status.type === 'error' ? 'text-red-600' : status.type === 'success' ? 'text-teal-deep' : 'text-ink-soft'}`}>{status.message}</p>
+            <p role="status" className={`mt-1 text-xs font-semibold ${status.type === 'error' ? 'text-red-600' : status.type === 'warning' ? 'text-amber-700' : status.type === 'success' ? 'text-teal-deep' : 'text-ink-soft'}`}>{status.message}</p>
           ) : null}
         </div>
         <div className="overflow-x-auto">
