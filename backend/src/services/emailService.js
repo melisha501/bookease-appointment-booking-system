@@ -24,6 +24,10 @@ try {
 const DEFAULT_APP_NAME = "BookEase";
 const DEFAULT_APP_URL = "http://localhost:5173";
 const DEFAULT_SUPPORT_EMAIL = "hello@bookease.com.np";
+// Resend's shared test sender. It only delivers to the Resend account owner's
+// address, so it is used as a development/test fallback and never silently in
+// production. Set RESEND_FROM_EMAIL to a verified-domain sender in production.
+const TEST_SENDER = "BookEase <onboarding@resend.dev>";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function readEnv(name) {
@@ -62,12 +66,20 @@ function normalizeRecipients(to) {
 
 function getConfig() {
   const apiKey = readEnv("RESEND_API_KEY");
-  const from = readEnv("RESEND_FROM_EMAIL");
+  const isProduction = readEnv("NODE_ENV").toLowerCase() === "production";
+  const configuredFrom = readEnv("RESEND_FROM_EMAIL");
+  // Production must use an explicitly configured, verified-domain sender.
+  // The shared Resend test sender is only a development/test fallback.
+  const from = configuredFrom || (isProduction ? "" : TEST_SENDER);
   const adminEmails = splitEmailList(process.env.ADMIN_NOTIFICATION_EMAIL);
   const replyTo = readEnv("EMAIL_REPLY_TO");
   const supportEmail = readEnv("SUPPORT_EMAIL") || DEFAULT_SUPPORT_EMAIL;
   const appName = readEnv("APP_NAME") || DEFAULT_APP_NAME;
-  const appUrl = (readEnv("APP_URL") || readEnv("FRONTEND_URL") || DEFAULT_APP_URL).replace(/\/+$/, "");
+  const configuredAppUrl = readEnv("APP_URL") || readEnv("FRONTEND_URL");
+  // Never silently fall back to localhost in production: emails would contain
+  // links that point at the developer's machine.
+  const appUrl = (configuredAppUrl || (isProduction ? "" : DEFAULT_APP_URL)).replace(/\/+$/, "");
+  const usingTestSender = /onboarding@resend\.dev/i.test(from);
 
   return {
     apiKey,
@@ -78,6 +90,8 @@ function getConfig() {
     supportEmail,
     appName,
     appUrl,
+    usingTestSender,
+    isProduction,
     enabled: Boolean(apiKey && from && ResendClient),
   };
 }
@@ -314,16 +328,49 @@ function renderText({ heading, intro, statusMeta, rows, ctaUrl, ctaLabel, appNam
   return lines.join("\n");
 }
 
+// Resend/network errors: decide whether an outbox retry can plausibly succeed.
+// 429 (rate limit) and 5xx/network/timeouts are transient; validation errors
+// (bad sender, invalid recipient, bad API key) will fail again, so retrying
+// them only delays the inevitable.
+function isRetryableError(err) {
+  if (!err) return true;
+  const statusCode = Number(err.statusCode || err.status || err.code);
+  if (Number.isFinite(statusCode)) {
+    if (statusCode === 429) return true;
+    if (statusCode >= 500) return true;
+    if (statusCode >= 400) return false;
+  }
+  const name = String(err.name || "").toLowerCase();
+  if (name === "rate_limit_exceeded") return true;
+  if (
+    name === "validation_error" ||
+    name === "invalid_api_key" ||
+    name === "restricted_api_key" ||
+    name === "not_found" ||
+    name === "missing_required_field"
+  ) {
+    return false;
+  }
+  // Unknown errors (DNS, socket resets, timeouts) are treated as transient.
+  return true;
+}
+
 async function safeSend({ to, subject, html, text, label = "email" }) {
   const config = getConfig();
 
   if (!config.enabled) {
     if (!ResendClient) {
       console.warn("[email] Resend package is not available; skipping email.");
+    } else if (config.isProduction && !config.from) {
+      console.warn("[email] RESEND_FROM_EMAIL is required in production; skipping email.");
     } else {
       console.warn("[email] RESEND_API_KEY/RESEND_FROM_EMAIL not configured; skipping email.");
     }
-    return { sent: false, skipped: true, reason: "not-configured" };
+    return { sent: false, skipped: true, reason: "not-configured", retryable: false };
+  }
+
+  if (config.usingTestSender && config.isProduction) {
+    console.warn("[email] Using Resend test sender in production. Verify a domain and set RESEND_FROM_EMAIL.");
   }
 
   const { valid, invalid } = normalizeRecipients(to);
@@ -332,7 +379,7 @@ async function safeSend({ to, subject, html, text, label = "email" }) {
   }
   if (!valid.length) {
     console.warn(`[email] No valid recipient for ${label}; skipping email.`);
-    return { sent: false, skipped: true, reason: "invalid-recipient" };
+    return { sent: false, skipped: true, reason: "invalid-recipient", retryable: false };
   }
 
   try {
@@ -349,14 +396,22 @@ async function safeSend({ to, subject, html, text, label = "email" }) {
     const result = await resend.emails.send(payload);
     if (result && result.error) {
       console.error(`[email] Resend returned an error for ${label}:`, result.error.message || "unknown error");
-      return { sent: false, error: result.error.message || "Email provider error" };
+      return {
+        sent: false,
+        error: result.error.message || "Email provider error",
+        retryable: isRetryableError(result.error),
+      };
     }
 
     return { sent: true, id: result?.data?.id || null, recipients: valid.length };
   } catch (err) {
     // Never include secrets. Keep the message useful for debugging.
     console.error(`[email] Failed to send ${label}:`, err && err.message ? err.message : err);
-    return { sent: false, error: err && err.message ? err.message : "Email send failed" };
+    return {
+      sent: false,
+      error: err && err.message ? err.message : "Email send failed",
+      retryable: isRetryableError(err),
+    };
   }
 }
 
@@ -389,46 +444,67 @@ function buildCustomerEmail({ details, statusMeta, heading, intro, previousStatu
   return { html, text, config };
 }
 
-async function sendAppointmentConfirmation(appointment) {
+function appLink(config, path) {
+  return config.appUrl ? `${config.appUrl}${path}` : "";
+}
+
+function prepareAppointmentConfirmation(appointment) {
+  const config = getConfig();
   const details = getDetails(appointment);
   details.status = details.status || "pending";
   const statusMeta = getStatusMeta(details.status);
   const heading = "Appointment booked successfully";
   const intro = `Hi ${details.customerName || "there"}, your appointment has been booked successfully. We have received your request and will review it shortly.`;
   const ctaLabel = "View my appointments";
-  const ctaUrl = `${getConfig().appUrl}/customer/appointments`;
+  const ctaUrl = appLink(config, "/customer/appointments");
   const subject = sanitizeSubject(
     `${statusMeta.subject}: ${details.service || "appointment"} (${details.reference || "booking"})`
   );
   const { html, text } = buildCustomerEmail({ details, statusMeta, heading, intro, ctaLabel, ctaUrl });
 
-  return safeSend({ to: details.customerEmail, subject, html, text, label: "booking confirmation" });
+  return {
+    type: "booking_confirmation",
+    to: details.customerEmail,
+    subject,
+    html,
+    text,
+    reference: details.reference,
+  };
 }
 
-async function sendAppointmentApproved(appointment) {
+function prepareAppointmentApproved(appointment) {
+  const config = getConfig();
   const details = getDetails(appointment);
   details.status = "confirmed";
   const statusMeta = getStatusMeta("confirmed");
   const heading = "Appointment confirmed";
   const intro = `Hi ${details.customerName || "there"}, good news — your appointment has been confirmed. Please arrive a few minutes early and keep your booking reference handy.`;
   const ctaLabel = "View my appointments";
-  const ctaUrl = `${getConfig().appUrl}/customer/appointments`;
+  const ctaUrl = appLink(config, "/customer/appointments");
   const subject = sanitizeSubject(
     `${statusMeta.subject}: ${details.service || "appointment"} (${details.reference || "booking"})`
   );
   const { html, text } = buildCustomerEmail({ details, statusMeta, heading, intro, ctaLabel, ctaUrl });
 
-  return safeSend({ to: details.customerEmail, subject, html, text, label: "appointment approval" });
+  return {
+    type: "appointment_approved",
+    to: details.customerEmail,
+    subject,
+    html,
+    text,
+    reference: details.reference,
+  };
 }
 
-async function sendAppointmentStatusUpdate(appointment, previousStatus) {
+function prepareAppointmentStatusUpdate(appointment, previousStatus) {
+  const config = getConfig();
   const details = getDetails(appointment);
   const currentStatus = details.status;
   const previous = String(previousStatus || "").trim().toLowerCase();
 
   // Never send a status email when nothing actually changed.
   if (previous && currentStatus && previous === currentStatus) {
-    return { sent: false, skipped: true, reason: "status-unchanged" };
+    return { skipped: true, reason: "status-unchanged" };
   }
 
   const statusMeta = getStatusMeta(currentStatus);
@@ -439,7 +515,7 @@ async function sendAppointmentStatusUpdate(appointment, previousStatus) {
       ? `Hi ${details.customerName || "there"}, your appointment status has changed from ${previousMeta.label} to ${statusMeta.label}. ${statusMeta.message}`
       : `Hi ${details.customerName || "there"}, ${statusMeta.message}`;
   const ctaLabel = "View my appointments";
-  const ctaUrl = `${getConfig().appUrl}/customer/appointments`;
+  const ctaUrl = appLink(config, "/customer/appointments");
   const subject = sanitizeSubject(
     `${statusMeta.subject}: ${details.service || "appointment"} (${details.reference || "booking"})`
   );
@@ -453,17 +529,26 @@ async function sendAppointmentStatusUpdate(appointment, previousStatus) {
     ctaUrl,
   });
 
-  return safeSend({ to: details.customerEmail, subject, html, text, label: `status update (${currentStatus || "unknown"})` });
+  return {
+    type: "status_update",
+    to: details.customerEmail,
+    subject,
+    html,
+    text,
+    reference: details.reference,
+    status: currentStatus,
+    previousStatus: previous || "",
+  };
 }
 
-async function sendAdminNewBookingNotification(appointment) {
+function prepareAdminNewBookingNotification(appointment) {
   const config = getConfig();
   const details = getDetails(appointment);
   details.status = details.status || "pending";
 
   if (!config.adminEmails.length) {
     console.warn("[email] ADMIN_NOTIFICATION_EMAIL not configured; skipping admin notification.");
-    return { sent: false, skipped: true, reason: "admin-not-configured" };
+    return { skipped: true, reason: "admin-not-configured" };
   }
 
   const statusMeta = getStatusMeta(details.status);
@@ -482,7 +567,7 @@ async function sendAdminNewBookingNotification(appointment) {
     ["Notes", details.notes],
   ].filter(([, value]) => String(value ?? "").trim() !== "");
   const ctaLabel = "Open admin dashboard";
-  const ctaUrl = `${config.appUrl}/admin/appointments`;
+  const ctaUrl = appLink(config, "/admin/appointments");
   const subject = sanitizeSubject(
     `New booking: ${details.service || "appointment"} — ${details.customerName || "customer"} (${details.reference || "booking"})`
   );
@@ -510,11 +595,51 @@ async function sendAdminNewBookingNotification(appointment) {
     supportEmail: config.supportEmail,
   });
 
-  return safeSend({
+  return {
+    type: "admin_new_booking",
     to: config.adminEmails,
     subject,
     html,
     text,
+    reference: details.reference,
+  };
+}
+
+// Low-level delivery used by the outbox. Returns { sent, id?, error?, retryable?, skipped? }.
+async function deliverEmail({ to, subject, html, text, label = "email" }) {
+  return safeSend({ to, subject, html, text, label });
+}
+
+async function sendAppointmentConfirmation(appointment) {
+  return deliverEmail({
+    ...prepareAppointmentConfirmation(appointment),
+    label: "booking confirmation",
+  });
+}
+
+async function sendAppointmentApproved(appointment) {
+  return deliverEmail({
+    ...prepareAppointmentApproved(appointment),
+    label: "appointment approval",
+  });
+}
+
+async function sendAppointmentStatusUpdate(appointment, previousStatus) {
+  const prepared = prepareAppointmentStatusUpdate(appointment, previousStatus);
+  if (prepared.skipped) return { sent: false, skipped: true, reason: prepared.reason };
+
+  return deliverEmail({
+    ...prepared,
+    label: `status update (${prepared.status || "unknown"})`,
+  });
+}
+
+async function sendAdminNewBookingNotification(appointment) {
+  const prepared = prepareAdminNewBookingNotification(appointment);
+  if (prepared.skipped) return { sent: false, skipped: true, reason: prepared.reason };
+
+  return deliverEmail({
+    ...prepared,
     label: "admin new-booking notification",
   });
 }
@@ -524,6 +649,12 @@ module.exports = {
   getStatusMeta,
   isValidEmail,
   normalizeRecipients,
+  isRetryableError,
+  deliverEmail,
+  prepareAppointmentConfirmation,
+  prepareAppointmentApproved,
+  prepareAppointmentStatusUpdate,
+  prepareAdminNewBookingNotification,
   sendAppointmentConfirmation,
   sendAppointmentApproved,
   sendAppointmentStatusUpdate,

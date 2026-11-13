@@ -5,6 +5,7 @@
 require("dotenv").config();
 
 const app = require("./app");
+const emailOutbox = require("./services/emailOutboxService");
 
 const PORT = Number(process.env.PORT || 5000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -12,6 +13,9 @@ const HOST = process.env.HOST || "0.0.0.0";
 const server = app.listen(PORT, HOST, () => {
   console.log(`Backend running at http://${HOST}:${PORT} (local: http://localhost:${PORT})`);
   console.log(`Health check:     http://localhost:${PORT}/api/health`);
+  // Retries pending/failed-schedule emails in the background without blocking
+  // requests. Safe to run in a single instance; rows are claimed atomically.
+  emailOutbox.startWorker();
 });
 
 server.on("error", (err) => {
@@ -29,6 +33,7 @@ server.on("error", (err) => {
 
 function shutdown(signal) {
   console.log(`\n[server] Received ${signal}. Shutting down...`);
+  emailOutbox.stopWorker();
   server.close(() => {
     console.log("[server] HTTP server closed.");
     process.exit(0);

@@ -10,16 +10,16 @@ function freshControllerWithPrisma(prismaMock) {
   const prismaPath = require.resolve("../src/lib/prisma");
   const controllerPath = require.resolve("../src/controllers/appointmentController");
   const schedulingPath = require.resolve("../src/utils/scheduling");
-  const emailPath = require.resolve("../src/services/emailService");
-  const noopEmail = {
-    sendAppointmentConfirmation: async () => ({ sent: true }),
-    sendAppointmentApproved: async () => ({ sent: true }),
-    sendAppointmentStatusUpdate: async () => ({ sent: true }),
-    sendAdminNewBookingNotification: async () => ({ sent: true }),
+  const outboxPath = require.resolve("../src/services/emailOutboxService");
+  const noopOutbox = {
+    queueAppointmentConfirmation: async () => ({ enqueued: true }),
+    queueAppointmentApproved: async () => ({ enqueued: true }),
+    queueAppointmentStatusUpdate: async () => ({ enqueued: true }),
+    queueAdminNewBookingNotification: async () => ({ enqueued: true }),
   };
   delete require.cache[controllerPath];
   require.cache[prismaPath] = { id: prismaPath, filename: prismaPath, loaded: true, exports: prismaMock };
-  require.cache[emailPath] = { id: emailPath, filename: emailPath, loaded: true, exports: noopEmail };
+  require.cache[outboxPath] = { id: outboxPath, filename: outboxPath, loaded: true, exports: noopOutbox };
   // scheduling is pure but clear cache for isolation
   delete require.cache[schedulingPath];
   return require("../src/controllers/appointmentController");

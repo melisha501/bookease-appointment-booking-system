@@ -1,7 +1,8 @@
 // Controller integration tests for appointment email notifications.
-// Prisma and the email service are mocked, so no database or Resend API calls
-// are made. These tests verify that emails are sent only after a successful
-// database operation and that email failures never break the API response.
+// Prisma and the email outbox service are mocked, so no database or Resend API
+// calls are made. These tests verify that notifications are queued only after a
+// successful database operation and that email failures never break the API
+// response.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -12,11 +13,11 @@ function freshController({ prisma, email }) {
   process.env.DATABASE_URL = process.env.DATABASE_URL || "postgresql://user:pass@localhost:5432/testdb";
   const prismaPath = require.resolve("../src/lib/prisma");
   const controllerPath = require.resolve("../src/controllers/appointmentController");
-  const emailPath = require.resolve("../src/services/emailService");
+  const outboxPath = require.resolve("../src/services/emailOutboxService");
 
   delete require.cache[controllerPath];
   require.cache[prismaPath] = { id: prismaPath, filename: prismaPath, loaded: true, exports: prisma };
-  require.cache[emailPath] = { id: emailPath, filename: emailPath, loaded: true, exports: email };
+  require.cache[outboxPath] = { id: outboxPath, filename: outboxPath, loaded: true, exports: email };
 
   return require("../src/controllers/appointmentController");
 }
@@ -38,21 +39,21 @@ function mockRes() {
 
 function makeEmailMock(events = []) {
   return {
-    sendAppointmentConfirmation: async (appointment) => {
+    queueAppointmentConfirmation: async (appointment) => {
       events.push({ type: "customer-confirmation", appointment });
-      return { sent: true, id: "customer_1" };
+      return { enqueued: true, delivery: { status: "sent" } };
     },
-    sendAppointmentApproved: async (appointment) => {
+    queueAppointmentApproved: async (appointment) => {
       events.push({ type: "customer-approved", appointment });
-      return { sent: true, id: "approved_1" };
+      return { enqueued: true, delivery: { status: "sent" } };
     },
-    sendAppointmentStatusUpdate: async (appointment, previousStatus) => {
+    queueAppointmentStatusUpdate: async (appointment, previousStatus) => {
       events.push({ type: "customer-status", appointment, previousStatus });
-      return { sent: true, id: "status_1" };
+      return { enqueued: true, delivery: { status: "sent" } };
     },
-    sendAdminNewBookingNotification: async (appointment) => {
+    queueAdminNewBookingNotification: async (appointment) => {
       events.push({ type: "admin-notification", appointment });
-      return { sent: true, id: "admin_1" };
+      return { enqueued: true, delivery: { status: "sent" } };
     },
   };
 }
@@ -184,10 +185,10 @@ test("no email is sent when the booking database transaction fails", async () =>
 
 test("email failures do not reverse a successful booking", async () => {
   const email = {
-    sendAppointmentConfirmation: async () => { throw new Error("email provider down"); },
-    sendAdminNewBookingNotification: async () => { throw new Error("email provider down"); },
-    sendAppointmentApproved: async () => { throw new Error("email provider down"); },
-    sendAppointmentStatusUpdate: async () => { throw new Error("email provider down"); },
+    queueAppointmentConfirmation: async () => { throw new Error("email provider down"); },
+    queueAdminNewBookingNotification: async () => { throw new Error("email provider down"); },
+    queueAppointmentApproved: async () => { throw new Error("email provider down"); },
+    queueAppointmentStatusUpdate: async () => { throw new Error("email provider down"); },
   };
   const prisma = makeCreatePrisma([]);
   const { createAppointment } = freshController({ prisma, email });
@@ -274,10 +275,10 @@ test("no email is sent when the status update fails", async () => {
 
 test("email failures do not reverse a successful status update", async () => {
   const email = {
-    sendAppointmentApproved: async () => { throw new Error("email provider down"); },
-    sendAppointmentStatusUpdate: async () => { throw new Error("email provider down"); },
-    sendAppointmentConfirmation: async () => { throw new Error("email provider down"); },
-    sendAdminNewBookingNotification: async () => { throw new Error("email provider down"); },
+    queueAppointmentApproved: async () => { throw new Error("email provider down"); },
+    queueAppointmentStatusUpdate: async () => { throw new Error("email provider down"); },
+    queueAppointmentConfirmation: async () => { throw new Error("email provider down"); },
+    queueAdminNewBookingNotification: async () => { throw new Error("email provider down"); },
   };
   const prisma = makeStatusPrisma("pending", "confirmed", []);
   const { updateStatus } = freshController({ prisma, email });

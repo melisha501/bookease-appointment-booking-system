@@ -3,12 +3,7 @@
 // and concurrency protection) live in ../utils/scheduling and are applied here.
 
 const prisma = require("../lib/prisma");
-const {
-  sendAppointmentConfirmation,
-  sendAppointmentApproved,
-  sendAppointmentStatusUpdate,
-  sendAdminNewBookingNotification,
-} = require("../services/emailService");
+const emailOutbox = require("../services/emailOutboxService");
 const {
   toMinutes,
   minutesToLabel,
@@ -350,11 +345,12 @@ async function createAppointment(req, res, next) {
       });
     });
 
-    // Best-effort notifications, sent only after the booking is persisted.
-    // A send failure must never undo or invalidate the booking.
+    // Best-effort notifications, queued only after the booking is persisted.
+    // Email problems are recorded in the outbox and retried; they must never
+    // undo or invalidate the booking.
     await Promise.all([
-      notifySafely("booking confirmation", () => sendAppointmentConfirmation(appointment)),
-      notifySafely("admin new-booking notification", () => sendAdminNewBookingNotification(appointment)),
+      notifySafely("booking confirmation", () => emailOutbox.queueAppointmentConfirmation(appointment)),
+      notifySafely("admin new-booking notification", () => emailOutbox.queueAdminNewBookingNotification(appointment)),
     ]);
 
     res.status(201).json({
@@ -414,7 +410,7 @@ async function cancelMine(req, res, next) {
     });
 
     // Best-effort cancellation email; the status update is already persisted.
-    await notifySafely("cancellation", () => sendAppointmentStatusUpdate(updated, appt.status));
+    await notifySafely("cancellation", () => emailOutbox.queueAppointmentStatusUpdate(updated, appt.status));
 
     res.json({ success: true, message: "Appointment cancelled.", appointment: appointmentToClient(updated) });
   } catch (err) {
@@ -477,9 +473,9 @@ async function updateStatus(req, res, next) {
     // Best-effort emails. Approval gets its own confirmation email; other
     // status changes (rejected/cancelled/completed) get a status update email.
     if (nextStatus === APPOINTMENT_STATUS.CONFIRMED) {
-      await notifySafely("approval", () => sendAppointmentApproved(updated));
+      await notifySafely("approval", () => emailOutbox.queueAppointmentApproved(updated, previousStatus));
     } else {
-      await notifySafely("status update", () => sendAppointmentStatusUpdate(updated, previousStatus));
+      await notifySafely("status update", () => emailOutbox.queueAppointmentStatusUpdate(updated, previousStatus));
     }
 
     res.json({
