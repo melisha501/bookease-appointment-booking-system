@@ -25,10 +25,11 @@ export default function SpecialistDetails() {
   const { id } = useParams();
   const { services: allServices } = useDemo();
   const [specialist, setSpecialist] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(Boolean(id));
+  const [error, setError] = useState(id ? '' : 'Specialist not found.');
 
   useEffect(() => {
+    if (!id) return undefined;
     let alive = true;
     async function load() {
       setLoading(true);
@@ -42,11 +43,7 @@ export default function SpecialistDetails() {
         if (alive) setLoading(false);
       }
     }
-    if (id) load();
-    else {
-      setLoading(false);
-      setError('Specialist not found.');
-    }
+    load();
     return () => {
       alive = false;
     };

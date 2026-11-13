@@ -14,10 +14,11 @@ import EmptyState from '../components/EmptyState';
 export default function ServiceDetails() {
   const { id } = useParams();
   const [service, setService] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(Boolean(id));
+  const [error, setError] = useState(id ? '' : 'Service not found.');
 
   useEffect(() => {
+    if (!id) return undefined;
     let alive = true;
     async function load() {
       setLoading(true);
@@ -31,11 +32,7 @@ export default function ServiceDetails() {
         if (alive) setLoading(false);
       }
     }
-    if (id) load();
-    else {
-      setLoading(false);
-      setError('Service not found.');
-    }
+    load();
     return () => {
       alive = false;
     };

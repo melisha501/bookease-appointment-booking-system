@@ -4,6 +4,8 @@
 import { Link } from 'react-router-dom';
 import { CalendarCheck, Clock, Mail, MapPin, Phone } from 'lucide-react';
 
+const CURRENT_YEAR = new Date().getFullYear();
+
 const quickLinks = [
   { label: 'Home', to: '/' },
   { label: 'Services', to: '/services' },
@@ -96,7 +98,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-12 border-t border-white/10 pt-6 text-center text-sm text-slate-400">
-          © {new Date().getFullYear()} BookEase — Appointment &amp; Service Booking
+          © {CURRENT_YEAR} BookEase — Appointment &amp; Service Booking
           System. All rights reserved.
         </div>
       </div>

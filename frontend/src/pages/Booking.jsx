@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Check, ChevronLeft, ChevronRight, Clock, Star, User, CalendarDays } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Clock, User, CalendarDays } from 'lucide-react';
 
 import { api } from '../api/client';
 import Button from '../components/Button';
@@ -37,15 +37,19 @@ export default function Booking() {
     email: user?.email || '',
     phone: user?.phone || '',
   });
+  const [detailsUser, setDetailsUser] = useState(user);
 
-  useEffect(() => {
-    if (!user) return;
+  // When auth state resolves (or the user object refreshes), backfill any
+  // fields the visitor has not edited yet. Render-time sync avoids an extra
+  // effect render pass.
+  if (user && user !== detailsUser) {
+    setDetailsUser(user);
     setDetails((current) => ({
       name: current.name || user.name || '',
       email: current.email || user.email || '',
       phone: current.phone || user.phone || '',
     }));
-  }, [user]);
+  }
 
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
@@ -146,7 +150,8 @@ export default function Booking() {
       })
     : '';
 
-  const today = new Date().toISOString().split('T')[0];
+  // Computed once per mount so the date input's `min` is stable during render.
+  const [today] = useState(() => new Date().toISOString().split('T')[0]);
   const bookedCount = slots.filter((s) => s.taken).length;
 
   const canContinue = () => {

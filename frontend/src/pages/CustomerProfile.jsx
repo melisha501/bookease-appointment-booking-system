@@ -1,7 +1,7 @@
 // CustomerProfile — view and edit the logged-in customer's account information.
 // Profile data comes from the authenticated backend user.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Check, Mail, MapPin, Pencil, Phone, User } from 'lucide-react';
 
 import { api } from '../api/client';
@@ -29,21 +29,23 @@ function Field({ id, label, icon: Icon, ...props }) {
 export default function CustomerProfile() {
   const { user, refreshUser, authLoading } = useDemo();
   const [form, setForm] = useState({ name: '', email: '', phone: '', address: '' });
+  const [syncedUser, setSyncedUser] = useState(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (user) {
-      setForm({
-        name: user.name || '',
-        email: user.email || '',
-        phone: user.phone || '',
-        address: user.address || '',
-      });
-    }
-  }, [user]);
+  // Keep the form in sync when the authenticated user resolves or refreshes.
+  // Render-time adjustment replaces an effect and avoids an extra render pass.
+  if (user && user !== syncedUser) {
+    setSyncedUser(user);
+    setForm({
+      name: user.name || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      address: user.address || '',
+    });
+  }
 
   if (authLoading) {
     return <p className="text-sm text-ink-soft">Loading your profile…</p>;
