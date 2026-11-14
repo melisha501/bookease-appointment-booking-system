@@ -417,7 +417,7 @@ export default function AdminOverview() {
           </div>
 
           <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+            <Card className="min-w-0 lg:col-span-2">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-base font-bold text-ink">Recent Appointments</h3>
                 <Link

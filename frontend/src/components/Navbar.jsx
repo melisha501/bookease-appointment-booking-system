@@ -61,7 +61,7 @@ export default function Navbar() {
         <div className="hidden items-center gap-3 md:flex">
           {isLoggedIn ? (
             <>
-              <span className="text-sm font-medium text-ink">{user?.name}</span>
+              <span className="hidden max-w-[12rem] truncate text-sm font-medium text-ink lg:block">{user?.name}</span>
               <Link to={dashboardTo} className="rounded-full px-4 py-2 text-sm font-semibold text-ink hover:bg-slate-100">
                 Dashboard
               </Link>

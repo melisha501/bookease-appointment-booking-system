@@ -31,8 +31,16 @@ const EMPTY_FORM = {
 
 export default function AdminServices() {
   const { services, categories, refreshCatalog } = useDemo();
+  const categoryOptions = (Array.isArray(categories) ? categories : []).filter((c) => c.id !== 'all');
   const [form, setForm] = useState(EMPTY_FORM);
   const [editing, setEditing] = useState(false);
+  // Keep the new-service form on a category that actually exists in the live
+  // catalog instead of the stale built-in default.
+  const effectiveCategoryId = editing
+    ? form.category
+    : categoryOptions.some((c) => c.id === form.category)
+      ? form.category
+      : categoryOptions[0]?.id || '';
   const [note, setNote] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imageBusy, setImageBusy] = useState(false);
@@ -124,6 +132,21 @@ export default function AdminServices() {
     e.preventDefault();
     if (!form.name.trim()) return;
 
+    // Make sure the selected category still exists (the catalog can change
+    // while the form is open). For a new service, fall back to the first
+    // available category instead of sending a stale default.
+    const selectedCategory =
+      categoryOptions.find((c) => c.id === effectiveCategoryId) || (editing ? null : categoryOptions[0]);
+    if (!selectedCategory) {
+      setImageStatus({
+        type: 'error',
+        message: editing
+          ? 'This service category no longer exists. Choose a valid category before saving.'
+          : 'Create a category before adding a service.',
+      });
+      return;
+    }
+
     setImageBusy(true);
     setImageProgress(0);
     let savedRecord = null;
@@ -134,7 +157,7 @@ export default function AdminServices() {
       const payload = {
         name: form.name,
         description: form.description,
-        category: form.category,
+        category: selectedCategory.id,
         price: form.price,
         duration: Number(form.duration) || 60,
         rating: Number(form.rating) || 4.8,
@@ -257,7 +280,13 @@ export default function AdminServices() {
               </tr>
             </thead>
             <tbody>
-              {services.map((s) => (
+              {services.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-10 text-center text-sm text-ink-soft">
+                    No services yet. Add your first service using the form.
+                  </td>
+                </tr>
+              ) : services.map((s) => (
                 <tr key={s.id} className="border-b border-line last:border-0 hover:bg-surface">
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
@@ -308,8 +337,11 @@ export default function AdminServices() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="svc-cat" className="mb-1.5 block text-sm font-semibold text-ink">Category</label>
-              <select id="svc-cat" value={form.category} onChange={(e) => update('category', e.target.value)} className={inputClassName}>
-                {categories.filter((c) => c.id !== 'all').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <select id="svc-cat" value={effectiveCategoryId} onChange={(e) => update('category', e.target.value)} className={inputClassName}>
+                {!categoryOptions.some((c) => c.id === effectiveCategoryId) ? (
+                  <option value={effectiveCategoryId} disabled>Select a category…</option>
+                ) : null}
+                {categoryOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>

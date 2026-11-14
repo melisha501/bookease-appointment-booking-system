@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CalendarDays, Clock, CreditCard, Hash, Timer, User, X } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Clock, CreditCard, Hash, Image as ImageIcon, Timer, User, X } from 'lucide-react';
 
 import { api } from '../api/client';
 import Button from '../components/Button';
@@ -11,6 +11,31 @@ import EmptyState from '../components/EmptyState';
 import StatusBadge from '../components/StatusBadge';
 import { canCancelAppointment } from '../store/DemoContext';
 import { useDemo } from '../store/DemoContext';
+
+function ServiceThumb({ service }) {
+  const [failed, setFailed] = useState(false);
+  const imageUrl = typeof service?.image === 'string' ? service.image.trim() : '';
+
+  if (imageUrl && !failed) {
+    return (
+      <img
+        src={imageUrl}
+        alt={service?.name || 'Service'}
+        onError={() => setFailed(true)}
+        className="h-36 w-full shrink-0 rounded-2xl object-cover sm:h-32 sm:w-44"
+      />
+    );
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      className="flex h-36 w-full shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-50 via-white to-slate-100 text-ink-soft sm:h-32 sm:w-44"
+    >
+      <ImageIcon className="h-7 w-7 text-teal-brand/70" />
+    </div>
+  );
+}
 
 function formatDate(value) {
   if (!value) return '—';
@@ -74,7 +99,12 @@ export default function BookingDetails() {
     );
   }
 
-  const service = (Array.isArray(services) ? services : []).find((item) => item.name === appointment.service) || null;
+  const service =
+    (Array.isArray(services) ? services : []).find(
+      (item) =>
+        (appointment.serviceId && item.id === appointment.serviceId) ||
+        item.name === appointment.service
+    ) || null;
   const rule = canCancelAppointment(appointment);
   const appointmentRef = appointment.reference || appointment.id;
   const payment = {
@@ -120,10 +150,10 @@ export default function BookingDetails() {
           <Card>
             <h3 className="text-base font-bold text-ink">Appointment Information</h3>
             <dl className="mt-4 space-y-3">
-              <div className="flex items-center gap-3"><Hash className="h-4 w-4 shrink-0 text-teal-deep" /><dt className="w-28 shrink-0 text-sm text-ink-soft">Reference</dt><dd className="text-sm font-bold text-ink">{appointmentRef}</dd></div>
+              <div className="flex items-center gap-3"><Hash className="h-4 w-4 shrink-0 text-teal-deep" /><dt className="w-28 shrink-0 text-sm text-ink-soft">Reference</dt><dd className="min-w-0 break-all text-sm font-bold text-ink">{appointmentRef}</dd></div>
               <div className="flex items-center gap-3"><CalendarDays className="h-4 w-4 shrink-0 text-teal-deep" /><dt className="w-28 shrink-0 text-sm text-ink-soft">Date</dt><dd className="text-sm font-semibold text-ink">{formatDate(appointment.date)}</dd></div>
               <div className="flex items-center gap-3"><Clock className="h-4 w-4 shrink-0 text-teal-deep" /><dt className="w-28 shrink-0 text-sm text-ink-soft">Time</dt><dd className="text-sm font-semibold text-ink">{appointment.time}</dd></div>
-              <div className="flex items-center gap-3"><User className="h-4 w-4 shrink-0 text-teal-deep" /><dt className="w-28 shrink-0 text-sm text-ink-soft">Customer</dt><dd className="text-sm font-semibold text-ink">{appointment.customer || appointment.customerName}</dd></div>
+              <div className="flex items-center gap-3"><User className="h-4 w-4 shrink-0 text-teal-deep" /><dt className="w-28 shrink-0 text-sm text-ink-soft">Customer</dt><dd className="min-w-0 break-words text-sm font-semibold text-ink">{appointment.customer || appointment.customerName}</dd></div>
               {appointment.notes ? (
                 <div className="flex items-start gap-3 pt-1"><dt className="w-28 shrink-0 text-sm text-ink-soft">Notes</dt><dd className="text-sm text-ink">{appointment.notes}</dd></div>
               ) : null}
@@ -134,7 +164,7 @@ export default function BookingDetails() {
             <h3 className="text-base font-bold text-ink">Service Details</h3>
             {service ? (
               <div className="mt-4 flex flex-col gap-4 sm:flex-row">
-                <img src={service.image} alt={service.name} className="h-36 w-full shrink-0 rounded-2xl object-cover sm:h-32 sm:w-44" />
+                <ServiceThumb service={service} />
                 <div>
                   <p className="font-bold text-ink">{service.name}</p>
                   <p className="mt-1 text-xs font-semibold tracking-wide text-teal-deep uppercase">{service.categoryName}</p>
@@ -158,7 +188,7 @@ export default function BookingDetails() {
               <p role="alert" className="mt-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">{rule.reason}</p>
             )}
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button variant="secondary" disabled={!rule.allowed || busy} onClick={handleCancel} className={rule.allowed ? 'text-red-600' : ''}>
+              <Button variant="danger" disabled={!rule.allowed || busy} onClick={handleCancel}>
                 <X className="h-4 w-4" /> {busy ? 'Cancelling…' : 'Cancel Appointment'}
               </Button>
               <Button to="/booking" variant="secondary">Book Another</Button>

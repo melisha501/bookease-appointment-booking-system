@@ -2,10 +2,11 @@
 // Only transitions permitted by the backend are offered: pending can be approved,
 // rejected, or cancelled; confirmed can be completed or cancelled.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Search, X } from 'lucide-react';
 
 import { api } from '../api/client';
+import Button from '../components/Button';
 import Card from '../components/Card';
 import EmptyState from '../components/EmptyState';
 import StatusBadge from '../components/StatusBadge';
@@ -59,18 +60,30 @@ export default function AdminAppointments() {
   const [status, setStatus] = useState('all');
   const [note, setNote] = useState('');
   const [busyRef, setBusyRef] = useState('');
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const load = async () => {
     setLoading(true);
     setError('');
     try {
       const data = await api.get('/appointments');
-      setAppointments(Array.isArray(data?.appointments) ? data.appointments : []);
+      if (mountedRef.current) {
+        setAppointments(Array.isArray(data?.appointments) ? data.appointments : []);
+      }
     } catch (err) {
-      setError(err?.message || 'Failed to load appointments.');
-      setAppointments([]);
+      if (mountedRef.current) {
+        setError(err?.message || 'Failed to load appointments.');
+        setAppointments([]);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -91,9 +104,9 @@ export default function AdminAppointments() {
       flash(data?.message || `${ref} → ${label}`);
       await load();
     } catch (err) {
-      setError(err?.message || 'Failed to update status.');
+      if (mountedRef.current) setError(err?.message || 'Failed to update status.');
     } finally {
-      setBusyRef('');
+      if (mountedRef.current) setBusyRef('');
     }
   };
 
@@ -146,7 +159,25 @@ export default function AdminAppointments() {
       {loading ? (
         <p className="text-sm text-ink-soft">Loading appointments…</p>
       ) : sorted.length === 0 ? (
-        <EmptyState title="No appointments" description="Appointments will appear here after customers book." icon={Search} />
+        appointments.length === 0 ? (
+          <EmptyState title="No appointments yet" description="Appointments will appear here after customers book." icon={Search} />
+        ) : (
+          <EmptyState
+            title="No appointments match your filters"
+            description="Try a different search term or status filter."
+            icon={Search}
+          >
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setSearch('');
+                setStatus('all');
+              }}
+            >
+              Clear filters
+            </Button>
+          </EmptyState>
+        )
       ) : (
         <Card padding="p-0" className="overflow-hidden">
           <div className="overflow-x-auto">

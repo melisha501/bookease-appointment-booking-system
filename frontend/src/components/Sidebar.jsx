@@ -38,7 +38,7 @@ export default function Sidebar({
             type="button"
             onClick={onClose}
             aria-label="Close dashboard menu"
-            className="rounded-lg p-2 text-ink hover:bg-slate-100 lg:hidden"
+            className="rounded-lg p-2 text-ink hover:bg-slate-100 md:hidden"
           >
             <X className="h-5 w-5" />
           </button>
@@ -88,7 +88,7 @@ export default function Sidebar({
 
       {/* Mobile drawer */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-ink/50"

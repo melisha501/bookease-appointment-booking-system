@@ -1,6 +1,6 @@
 // Home — landing page for the public website.
-// Exact project description and NPR pricing per brief. Data comes from the
-// demo store (clone of mockData) so Admin edits appear here automatically.
+// Services, specialists, and categories come from the shared catalog context,
+// which loads live backend data (with retry and cached-data fallback).
 
 import { Link } from 'react-router-dom';
 import {
@@ -19,7 +19,7 @@ import SpecialistCard from '../components/SpecialistCard';
 import { useDemo } from '../store/DemoContext';
 
 export default function Home() {
-  // Data comes from the demo context (local data, not an API).
+  // Data comes from the shared catalog context (backend-backed).
   // Use Array.isArray defaults so a missing array can never crash
   // .map()/.filter() rendering (blank page). Empty arrays still render
   // their sections safely with no items.
@@ -150,37 +150,49 @@ export default function Home() {
         </div>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {popularCategories.map((category) => (
-            <Link
-              key={category.id}
-              to="/services"
-              className="rounded-2xl border border-line bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-lg font-bold text-teal-deep">
-                {category.name[0]}
-              </span>
-              <h3 className="mt-4 text-base font-bold text-ink">{category.name}</h3>
-              <p className="mt-1 text-sm text-ink-soft">
-                {services.filter((service) => service.category === category.id).length} services available
-              </p>
-            </Link>
-          ))}
+          {popularCategories.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-line bg-white px-5 py-8 text-center text-sm text-ink-soft sm:col-span-2 lg:col-span-4">
+              {demo.catalogLoading ? 'Loading categories…' : 'No categories are available yet.'}
+            </p>
+          ) : (
+            popularCategories.map((category) => (
+              <Link
+                key={category.id}
+                to="/services"
+                className="rounded-2xl border border-line bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-lg font-bold text-teal-deep">
+                  {(category.name || '?')[0]}
+                </span>
+                <h3 className="mt-4 text-base font-bold text-ink">{category.name}</h3>
+                <p className="mt-1 text-sm text-ink-soft">
+                  {services.filter((service) => service.category === category.id).length} services available
+                </p>
+              </Link>
+            ))
+          )}
         </div>
 
         {/* Popular services (text list with links) */}
         <div className="mt-10 rounded-2xl border border-line bg-white p-6 shadow-sm">
           <h3 className="text-base font-bold text-ink">Popular Services</h3>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {popularServices.map((service) => (
-              <Link
-                key={service.id}
-                to={`/services/${service.id}`}
-                className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm hover:bg-surface"
-              >
-                <span className="font-medium text-ink">{service.name}</span>
-                <span className="font-bold whitespace-nowrap text-teal-deep">{service.price}</span>
-              </Link>
-            ))}
+            {popularServices.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-ink-soft">
+                {demo.catalogLoading ? 'Loading services…' : 'No services are available yet.'}
+              </p>
+            ) : (
+              popularServices.map((service) => (
+                <Link
+                  key={service.id}
+                  to={`/services/${service.id}`}
+                  className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm hover:bg-surface"
+                >
+                  <span className="font-medium text-ink">{service.name}</span>
+                  <span className="font-bold whitespace-nowrap text-teal-deep">{service.price}</span>
+                </Link>
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -199,9 +211,19 @@ export default function Home() {
           </div>
 
           <div className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-            {featuredServices.map((service) => (
-              <ServiceCard key={service.id} service={service} />
-            ))}
+            {featuredServices.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-line bg-white px-6 py-10 text-center text-sm text-ink-soft sm:col-span-2 xl:col-span-4">
+                {demo.catalogLoading
+                  ? 'Loading services…'
+                  : demo.catalogError
+                    ? 'Services could not be loaded. Use Retry above.'
+                    : 'No services are available yet.'}
+              </p>
+            ) : (
+              featuredServices.map((service) => (
+                <ServiceCard key={service.id} service={service} />
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -219,12 +241,22 @@ export default function Home() {
         </div>
 
         <div className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
-          {featuredSpecialists.map((specialist) => {
-            const names = (Array.isArray(specialist.serviceIds) ? specialist.serviceIds : [])
-              .map((sid) => services.find((s) => s.id === sid)?.name)
-              .filter(Boolean);
-            return <SpecialistCard key={specialist.id} specialist={specialist} serviceNames={names} />;
-          })}
+          {featuredSpecialists.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-line bg-white px-6 py-10 text-center text-sm text-ink-soft sm:col-span-2 xl:col-span-4">
+              {demo.catalogLoading
+                ? 'Loading specialists…'
+                : demo.catalogError
+                  ? 'Specialists could not be loaded. Use Retry above.'
+                  : 'No specialists are available yet.'}
+            </p>
+          ) : (
+            featuredSpecialists.map((specialist) => {
+              const names = (Array.isArray(specialist.serviceIds) ? specialist.serviceIds : [])
+                .map((sid) => services.find((s) => s.id === sid)?.name)
+                .filter(Boolean);
+              return <SpecialistCard key={specialist.id} specialist={specialist} serviceNames={names} />;
+            })
+          )}
         </div>
       </section>
 
@@ -256,13 +288,13 @@ export default function Home() {
 
       {/* ----- Final CTA ----- */}
       <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
-        <div className="rounded-3xl bg-teal-deep px-6 py-12 text-center sm:px-12">
+        <div className="rounded-3xl bg-teal-950 px-6 py-12 text-center sm:px-12">
           <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Ready to book your appointment?</h2>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-teal-100 sm:text-base">
             Choose a service, pick your specialist and reserve your slot in under a minute.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <Button to="/booking" size="lg" className="bg-white text-teal-deep hover:bg-teal-50">
+            <Button to="/booking" size="lg" variant="cta">
               Book Appointment
               <ArrowRight className="h-5 w-5" />
             </Button>

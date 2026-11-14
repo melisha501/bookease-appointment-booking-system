@@ -69,8 +69,8 @@ export default function Topbar({
 
         <div className="flex items-center gap-2">
           <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-deep text-xs font-bold text-white">{initials}</span>
-          <span className="hidden sm:block">
-            <span className="block text-sm leading-tight font-semibold text-ink">{displayName}</span>
+          <span className="hidden min-w-0 sm:block">
+            <span className="block max-w-[10rem] truncate text-sm leading-tight font-semibold text-ink">{displayName}</span>
             <span className="block text-xs text-ink-soft">{roleLabel}</span>
           </span>
           <button

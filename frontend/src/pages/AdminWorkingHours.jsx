@@ -128,6 +128,10 @@ const EMPTY_EXCEPTION_FORM = { date: '', type: 'unavailable', note: '' };
 
 export default function AdminWorkingHours() {
   const { specialists, refreshCatalog, catalogLoading, catalogError } = useDemo();
+  const specialistList = useMemo(
+    () => (Array.isArray(specialists) ? specialists : []),
+    [specialists]
+  );
   const [providerId, setProviderId] = useState('');
   const [schedule, setSchedule] = useState({ ...DEFAULT_SCHEDULE });
   const [dateExceptions, setDateExceptions] = useState([]);
@@ -147,8 +151,8 @@ export default function AdminWorkingHours() {
   const [exceptionFieldErrors, setExceptionFieldErrors] = useState({});
 
   const provider = useMemo(
-    () => (Array.isArray(specialists) ? specialists : []).find((s) => s.id === providerId) || null,
-    [specialists, providerId]
+    () => specialistList.find((s) => s.id === providerId) || null,
+    [specialistList, providerId]
   );
 
   // Include any non-standard time values already stored so edits never silently drop them.
@@ -161,10 +165,10 @@ export default function AdminWorkingHours() {
   }, [schedule]);
 
   useEffect(() => {
-    if (!providerId && specialists.length > 0) {
-      setProviderId(specialists[0].id);
+    if (!providerId && specialistList.length > 0) {
+      setProviderId(specialistList[0].id);
     }
-  }, [specialists, providerId]);
+  }, [specialistList, providerId]);
 
   const flash = (msg) => {
     setNotice(msg);
@@ -382,7 +386,7 @@ export default function AdminWorkingHours() {
     }
   };
 
-  if (catalogLoading) {
+  if (catalogLoading && specialistList.length === 0) {
     return (
       <Card>
         <p className="flex items-center gap-2 text-sm text-ink-soft">
@@ -392,17 +396,20 @@ export default function AdminWorkingHours() {
     );
   }
 
-  if (catalogError) {
+  if (catalogError && specialistList.length === 0) {
     return (
       <Card>
         <p role="alert" className="flex items-start gap-2 text-sm font-medium text-red-600">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {catalogError}
         </p>
+        <Button variant="secondary" size="sm" className="mt-4" onClick={() => refreshCatalog()}>
+          Retry
+        </Button>
       </Card>
     );
   }
 
-  if (specialists.length === 0) {
+  if (specialistList.length === 0) {
     return (
       <Card>
         <p className="text-sm text-ink-soft">No specialists found. Add a specialist first, then configure working hours.</p>
@@ -412,6 +419,18 @@ export default function AdminWorkingHours() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-5">
+      {catalogError ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 lg:col-span-5"
+        >
+          <span>{catalogError}</span>
+          <Button variant="secondary" size="sm" onClick={() => refreshCatalog()}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+
       <div className="space-y-6 lg:col-span-3">
         <Card>
           <h3 className="flex items-center gap-2 text-base font-bold text-ink">
@@ -426,7 +445,7 @@ export default function AdminWorkingHours() {
               onChange={(e) => { setProviderId(e.target.value); setError(''); setNotice(''); }}
               className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
             >
-              {specialists.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.title}</option>)}
+              {specialistList.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.title}</option>)}
             </select>
           </div>
 
@@ -620,9 +639,9 @@ export default function AdminWorkingHours() {
             ) : (
               dateExceptions.map((ex) => (
                 <div key={ex.id || ex.date} className="flex items-start justify-between gap-3 rounded-2xl border border-line p-3">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-bold text-ink">{formatExceptionDate(ex.date)} <span className="font-semibold text-ink-soft">({ex.date})</span></p>
-                    <p className="text-xs text-ink-soft capitalize">{ex.type}{ex.note ? ` · ${ex.note}` : ''}</p>
+                    <p className="break-words text-xs text-ink-soft capitalize">{ex.type}{ex.note ? ` · ${ex.note}` : ''}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <button
@@ -663,11 +682,13 @@ export default function AdminWorkingHours() {
               return (
                 <div key={ref} className="rounded-2xl border border-line p-4">
                   <div className="flex items-start justify-between gap-2">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm font-bold text-ink">{a.service}</p>
-                      <p className="text-xs text-ink-soft">{a.customer || a.customerName} · {a.date} {a.time} · {ref}</p>
+                      <p className="break-words text-xs text-ink-soft">{a.customer || a.customerName} · {a.date} {a.time} · {ref}</p>
                     </div>
-                    <StatusBadge status={a.status} />
+                    <span className="shrink-0">
+                      <StatusBadge status={a.status} />
+                    </span>
                   </div>
                   {a.status === 'confirmed' && (
                     <Button size="sm" className="mt-3" onClick={() => handleComplete(ref)}>

@@ -19,9 +19,46 @@ const steps = [
   { id: 4, label: 'Summary' },
 ];
 
+// Local calendar date (YYYY-MM-DD). Using toISOString() would shift the date
+// for users east of UTC late in the day, wrongly disabling "today".
+function toDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function SpecialistAvatar({ specialist }) {
+  const [failed, setFailed] = useState(false);
+  const imageUrl = typeof specialist?.image === 'string' ? specialist.image.trim() : '';
+  const initial = (specialist?.name || '?').trim().slice(0, 1).toUpperCase() || '?';
+
+  if (imageUrl && !failed) {
+    return (
+      <img
+        src={imageUrl}
+        alt={specialist?.name || 'Specialist'}
+        onError={() => setFailed(true)}
+        className="h-14 w-14 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-teal-50 text-lg font-bold text-teal-deep ring-1 ring-teal-100"
+    >
+      {initial}
+    </span>
+  );
+}
+
 export default function Booking() {
   const [searchParams] = useSearchParams();
-  const { services, specialists, user, isLoggedIn } = useDemo();
+  const { services, specialists, user, isLoggedIn, catalogLoading, catalogError, refreshCatalog } = useDemo();
+  const serviceList = Array.isArray(services) ? services : [];
+  const specialistList = Array.isArray(specialists) ? specialists : [];
 
   const preselectedService = searchParams.get('service') || '';
   const preselectedSpecialist = searchParams.get('specialist') || '';
@@ -151,7 +188,7 @@ export default function Booking() {
     : '';
 
   // Computed once per mount so the date input's `min` is stable during render.
-  const [today] = useState(() => new Date().toISOString().split('T')[0]);
+  const [today] = useState(toDateInputValue);
   const bookedCount = slots.filter((s) => s.taken).length;
 
   const canContinue = () => {
@@ -222,6 +259,7 @@ export default function Booking() {
     setStep(1);
     setServiceId('');
     setSpecialistId('');
+    setPreferredSpecialistId('');
     setDate('');
     setTime('');
     setNotes('');
@@ -293,13 +331,40 @@ export default function Booking() {
               </p>
             )}
 
+            {catalogError && (serviceList.length > 0 || specialistList.length > 0) ? (
+              <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Some catalog data could not be refreshed. {catalogError}{' '}
+                <button type="button" onClick={refreshCatalog} className="font-semibold underline">
+                  Retry
+                </button>
+              </div>
+            ) : null}
+
             {/* Step 1 */}
             {step === 1 && (
               <div>
                 <h2 className="text-lg font-bold text-ink">Select a Service</h2>
                 <p className="mt-1 text-sm text-ink-soft">Choose one service to book.</p>
+                {catalogLoading && serviceList.length === 0 ? (
+                  <p className="mt-6 text-sm text-ink-soft">Loading services…</p>
+                ) : serviceList.length === 0 ? (
+                  <div className="mt-6">
+                    <EmptyState
+                      title={catalogError ? 'Could not load services' : 'No services available'}
+                      description={
+                        catalogError ||
+                        'There are no services to book right now. Please check back later or contact the business.'
+                      }
+                      icon={CalendarDays}
+                    >
+                      {catalogError ? (
+                        <Button onClick={refreshCatalog} variant="secondary">Try again</Button>
+                      ) : null}
+                    </EmptyState>
+                  </div>
+                ) : (
                 <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                  {(Array.isArray(services) ? services : []).map((service) => {
+                  {serviceList.map((service) => {
                     const selected = serviceId === service.id;
                     return (
                       <button
@@ -308,7 +373,7 @@ export default function Booking() {
                         onClick={() => {
                           setServiceId(service.id);
                           const preferred = preferredSpecialistId
-                            ? (Array.isArray(specialists) ? specialists : []).find((s) => s.id === preferredSpecialistId)
+                            ? specialistList.find((s) => s.id === preferredSpecialistId)
                             : null;
                           const compatible = preferred && Array.isArray(preferred.serviceIds) && preferred.serviceIds.includes(service.id);
                           setSpecialistId(compatible ? preferred.id : '');
@@ -336,6 +401,7 @@ export default function Booking() {
                     );
                   })}
                 </div>
+                )}
               </div>
             )}
 
@@ -348,6 +414,25 @@ export default function Booking() {
                     ? `Specialists available for ${selectedService.name}${selectedSpecialist ? `. ${selectedSpecialist.name} is selected.` : ''}`
                     : 'Choose who you would like to see.'}
                 </p>
+                {catalogLoading && specialistList.length === 0 ? (
+                  <p className="mt-6 text-sm text-ink-soft">Loading specialists…</p>
+                ) : availableSpecialists.length === 0 ? (
+                  <div className="mt-6">
+                    <EmptyState
+                      title={catalogError ? 'Could not load specialists' : 'No specialists available'}
+                      description={
+                        catalogError ||
+                        'No specialists are available for this service right now. Please choose another service or check back later.'
+                      }
+                      icon={User}
+                    >
+                      {catalogError ? (
+                        <Button onClick={refreshCatalog} variant="secondary">Try again</Button>
+                      ) : null}
+                      <Button onClick={() => setStep(1)} variant="secondary">Change service</Button>
+                    </EmptyState>
+                  </div>
+                ) : (
                 <div className="mt-6 grid gap-4 sm:grid-cols-2">
                   {availableSpecialists.map((specialist) => {
                     const selected = specialistId === specialist.id;
@@ -361,16 +446,17 @@ export default function Booking() {
                           selected ? 'border-teal-deep bg-teal-50 ring-1 ring-teal-deep' : 'border-line bg-white hover:border-teal-brand'
                         }`}
                       >
-                        <img src={specialist.image} alt={specialist.name} className="h-14 w-14 shrink-0 rounded-full object-cover" />
+                        <SpecialistAvatar specialist={specialist} />
                         <div className="min-w-0 flex-1">
-                          <p className="font-bold text-ink">{specialist.name}</p>
-                          <p className="text-sm text-teal-deep">{specialist.title}</p>
-                          <p className="mt-0.5 text-xs text-ink-soft">{specialist.specialty}</p>
+                          <p className="truncate font-bold text-ink">{specialist.name}</p>
+                          <p className="truncate text-sm text-teal-deep">{specialist.title}</p>
+                          <p className="mt-0.5 truncate text-xs text-ink-soft">{specialist.specialty}</p>
                         </div>
                       </button>
                     );
                   })}
                 </div>
+                )}
               </div>
             )}
 
@@ -473,14 +559,14 @@ export default function Booking() {
                 <p className="mt-1 text-sm text-ink-soft">Please check your details before confirming.</p>
 
                 <dl className="mt-6 divide-y divide-line rounded-2xl border border-line">
-                  <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Service</dt><dd className="text-sm font-bold text-ink">{selectedService?.name}</dd></div>
-                  <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Specialist</dt><dd className="text-sm font-bold text-ink">{selectedSpecialist?.name}</dd></div>
+                  <div className="flex items-center justify-between gap-4 px-5 py-4"><dt className="shrink-0 text-sm text-ink-soft">Service</dt><dd className="min-w-0 text-right text-sm font-bold text-ink">{selectedService?.name}</dd></div>
+                  <div className="flex items-center justify-between gap-4 px-5 py-4"><dt className="shrink-0 text-sm text-ink-soft">Specialist</dt><dd className="min-w-0 text-right text-sm font-bold text-ink">{selectedSpecialist?.name}</dd></div>
                   <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Date</dt><dd className="text-sm font-bold text-ink">{prettyDate}</dd></div>
                   <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Time</dt><dd className="text-sm font-bold text-ink">{time}</dd></div>
                   <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Duration</dt><dd className="text-sm font-bold text-ink">{selectedService?.duration} mins</dd></div>
-                  <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Customer</dt><dd className="text-sm font-bold text-ink">{details.name}</dd></div>
-                  <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Email</dt><dd className="text-sm font-bold text-ink">{details.email}</dd></div>
-                  <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm text-ink-soft">Phone</dt><dd className="text-sm font-bold text-ink">{details.phone}</dd></div>
+                  <div className="flex items-center justify-between gap-4 px-5 py-4"><dt className="shrink-0 text-sm text-ink-soft">Customer</dt><dd className="min-w-0 break-words text-right text-sm font-bold text-ink">{details.name}</dd></div>
+                  <div className="flex items-center justify-between gap-4 px-5 py-4"><dt className="shrink-0 text-sm text-ink-soft">Email</dt><dd className="min-w-0 break-all text-right text-sm font-bold text-ink">{details.email}</dd></div>
+                  <div className="flex items-center justify-between gap-4 px-5 py-4"><dt className="shrink-0 text-sm text-ink-soft">Phone</dt><dd className="min-w-0 break-words text-right text-sm font-bold text-ink">{details.phone}</dd></div>
                   <div className="flex items-center justify-between gap-4 px-5 py-4"><dt className="shrink-0 text-sm text-ink-soft">Notes</dt><dd className="text-right text-sm font-medium text-ink">{notes || '—'}</dd></div>
                   <div className="flex items-center justify-between px-5 py-4"><dt className="text-sm font-semibold text-ink">Total</dt><dd className="text-lg font-bold text-teal-deep">{selectedService?.price}</dd></div>
                 </dl>

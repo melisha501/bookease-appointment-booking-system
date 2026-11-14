@@ -1,6 +1,6 @@
 // My Appointments — loads the logged-in customer's appointments from the backend.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarDays, Search, X } from 'lucide-react';
 
@@ -38,18 +38,30 @@ export default function MyAppointments() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const load = async () => {
     setLoading(true);
     setLoadError('');
     try {
       const data = await api.get('/appointments/mine');
-      setAppointments(Array.isArray(data?.appointments) ? data.appointments : []);
+      if (mountedRef.current) {
+        setAppointments(Array.isArray(data?.appointments) ? data.appointments : []);
+      }
     } catch (err) {
-      setLoadError(err?.message || 'Failed to load appointments.');
-      setAppointments([]);
+      if (mountedRef.current) {
+        setLoadError(err?.message || 'Failed to load appointments.');
+        setAppointments([]);
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -104,7 +116,7 @@ export default function MyAppointments() {
 
       {message && <p role="status" className="rounded-xl bg-teal-50 px-4 py-3 text-sm font-medium text-teal-deep">{message}</p>}
       {error && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{error}</p>}
-      {loadError && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{loadError}</p>}
+      {loadError && appointments.length > 0 && <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{loadError}</p>}
 
       <Card padding="p-4 sm:p-5" className="space-y-4">
         <div className="relative max-w-md">
@@ -136,10 +148,32 @@ export default function MyAppointments() {
 
       {loading ? (
         <p className="text-sm text-ink-soft">Loading your appointments…</p>
-      ) : sorted.length === 0 ? (
-        <EmptyState title="No appointments found" description="Book a service to see your appointments here." icon={CalendarDays}>
-          <Button to="/booking">Book Appointment</Button>
+      ) : loadError && appointments.length === 0 ? (
+        <EmptyState title="Could not load appointments" description={loadError} icon={CalendarDays}>
+          <Button onClick={load} variant="secondary">Try again</Button>
         </EmptyState>
+      ) : sorted.length === 0 ? (
+        appointments.length === 0 ? (
+          <EmptyState title="No appointments yet" description="Book a service to see your appointments here." icon={CalendarDays}>
+            <Button to="/booking">Book Appointment</Button>
+          </EmptyState>
+        ) : (
+          <EmptyState
+            title="No appointments match your filters"
+            description="Try a different search word or choose another status."
+            icon={Search}
+          >
+            <Button
+              onClick={() => {
+                setSearch('');
+                setActiveStatus('all');
+              }}
+              variant="secondary"
+            >
+              Clear filters
+            </Button>
+          </EmptyState>
+        )
       ) : (
         <>
           <Card padding="p-0" className="hidden overflow-hidden md:block">

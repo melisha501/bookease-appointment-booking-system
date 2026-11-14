@@ -3,13 +3,18 @@
 // - Catalog data (categories, services, specialists, schedules) is fetched from the backend.
 // - Appointments/admin data will be fetched from backend APIs as those endpoints are integrated.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, clearToken, getToken, setToken } from "../api/client";
 import { canCancelAppointment, DemoContext } from "./DemoContext";
 
 // Stable empty list so the context value memo isn't invalidated on every render.
 const TESTIMONIALS = [];
+
+const ALL_CATEGORY = { id: "all", name: "All" };
+const CATALOG_CACHE_KEY = "bookease_catalog_cache_v1";
+const CATALOG_STALE_MS = 5 * 60 * 1000;
+const CATALOG_RETRY_ON_VISIBLE_MS = 30 * 1000;
 
 function schedulesArrayToMap(specialists) {
   const map = {};
@@ -19,46 +24,223 @@ function schedulesArrayToMap(specialists) {
   return map;
 }
 
+// Last known good catalog is cached so a browser refresh or a slow cold start
+// never flashes an empty site. It is refreshed from the API on every load.
+function readCatalogCache() {
+  try {
+    const raw = localStorage.getItem(CATALOG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const categories = Array.isArray(parsed.categories) ? parsed.categories : [];
+    const services = Array.isArray(parsed.services) ? parsed.services : [];
+    const specialists = Array.isArray(parsed.specialists) ? parsed.specialists : [];
+    if (!categories.length && !services.length && !specialists.length) return null;
+    return {
+      categories: categories.length ? categories : [ALL_CATEGORY],
+      services,
+      specialists,
+      savedAt: Number(parsed.savedAt) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCatalogCache(catalog) {
+  try {
+    localStorage.setItem(
+      CATALOG_CACHE_KEY,
+      JSON.stringify({
+        categories: catalog.categories,
+        services: catalog.services,
+        specialists: catalog.specialists,
+        savedAt: catalog.savedAt,
+      })
+    );
+  } catch {
+    // Cache is best-effort; storage may be full or disabled.
+  }
+}
+
+// Treat a missing/incorrect list shape as an error instead of silently
+// rendering an empty catalog (which previously hid API/proxy problems).
+function readCatalogList(response, key) {
+  if (!response || typeof response !== "object" || !Array.isArray(response[key])) {
+    const error = new Error(`The server returned an unexpected response for ${key}.`);
+    error.code = "INVALID_CATALOG_RESPONSE";
+    throw error;
+  }
+  return response[key];
+}
+
 export function DemoProvider({ children }) {
-  const [services, setServices] = useState([]);
-  const [specialists, setSpecialists] = useState([]);
-  const [categories, setCategories] = useState([{ id: "all", name: "All" }]);
-  const [schedules, setSchedules] = useState({});
+  const [initialCache] = useState(readCatalogCache);
+
+  const [services, setServices] = useState(() => initialCache?.services ?? []);
+  const [specialists, setSpecialists] = useState(() => initialCache?.specialists ?? []);
+  const [categories, setCategories] = useState(() =>
+    initialCache?.categories?.length ? initialCache.categories : [ALL_CATEGORY]
+  );
+  const [schedules, setSchedules] = useState(() =>
+    schedulesArrayToMap(initialCache?.specialists ?? [])
+  );
   const [appointments, setAppointments] = useState([]);
 
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogLoading, setCatalogLoading] = useState(!initialCache);
   const [catalogError, setCatalogError] = useState("");
 
-  const loadCatalog = useCallback(async () => {
-    setCatalogLoading(true);
-    setCatalogError("");
-    try {
-      const [catRes, svcRes, spRes] = await Promise.all([
-        api.get("/categories"),
-        api.get("/services"),
-        api.get("/specialists"),
-      ]);
-      const cats = Array.isArray(catRes?.categories) ? catRes.categories : [];
-      const svcs = Array.isArray(svcRes?.services) ? svcRes.services : [];
-      const sps = Array.isArray(spRes?.specialists) ? spRes.specialists : [];
-      setCategories(cats.length ? cats : [{ id: "all", name: "All" }]);
-      setServices(svcs);
-      setSpecialists(sps);
-      setSchedules(schedulesArrayToMap(sps));
-    } catch (err) {
-      setCatalogError(err?.message || "Failed to load data from the server.");
-      setServices([]);
-      setSpecialists([]);
-      setSchedules({});
-    } finally {
-      setCatalogLoading(false);
-    }
+  // Refs keep loadCatalog stable (so mount effects never re-fire on data
+  // changes) while still giving us the latest data for merge/race handling.
+  const catalogRef = useRef({
+    categories: initialCache?.categories?.length ? initialCache.categories : [ALL_CATEGORY],
+    services: initialCache?.services ?? [],
+    specialists: initialCache?.specialists ?? [],
+  });
+  const inFlightRef = useRef(null);
+  const requestIdRef = useRef(0);
+  const lastAttemptAtRef = useRef(initialCache?.savedAt || 0);
+  const catalogErrorRef = useRef("");
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadCatalog = useCallback((options = {}) => {
+    const force = options?.force === true;
+
+    // De-duplicate concurrent calls (e.g. multiple pages mounting + Retry),
+    // unless a mutation explicitly asks for a fresh snapshot.
+    if (inFlightRef.current && !force) return inFlightRef.current;
+
+    const requestId = ++requestIdRef.current;
+    lastAttemptAtRef.current = Date.now();
+
+    const hasData = Boolean(
+      catalogRef.current.categories.length > 1 ||
+        catalogRef.current.services.length ||
+        catalogRef.current.specialists.length
+    );
+    if (!hasData) setCatalogLoading(true);
+
+    const request = (async () => {
+      const resources = [
+        { key: "categories", path: "/categories" },
+        { key: "services", path: "/services" },
+        { key: "specialists", path: "/specialists" },
+      ];
+
+      // Settle each endpoint independently: one failing request must not wipe
+      // out data from the other successful endpoints.
+      const results = await Promise.allSettled(resources.map((item) => api.get(item.path)));
+
+      // Ignore stale responses if a newer load was started.
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
+
+      const failures = [];
+      const successfulKeys = new Set();
+
+      results.forEach((result, index) => {
+        const { key } = resources[index];
+        if (result.status === "rejected") {
+          failures.push({ key, message: result.reason?.message || "Request failed." });
+          return;
+        }
+
+        let list;
+        try {
+          list = readCatalogList(result.value, key);
+        } catch (err) {
+          failures.push({ key, message: err.message });
+          return;
+        }
+
+        successfulKeys.add(key);
+        if (key === "categories") {
+          const next = list.length ? list : [ALL_CATEGORY];
+          catalogRef.current = { ...catalogRef.current, categories: next };
+          setCategories(next);
+        } else if (key === "services") {
+          catalogRef.current = { ...catalogRef.current, services: list };
+          setServices(list);
+        } else {
+          catalogRef.current = { ...catalogRef.current, specialists: list };
+          setSpecialists(list);
+          setSchedules(schedulesArrayToMap(list));
+        }
+      });
+
+      if (successfulKeys.size > 0) {
+        writeCatalogCache({ ...catalogRef.current, savedAt: Date.now() });
+      }
+
+      const nowHasData = Boolean(
+        catalogRef.current.categories.length > 1 ||
+          catalogRef.current.services.length ||
+          catalogRef.current.specialists.length
+      );
+
+      if (failures.length) {
+        const labels = failures.map((failure) => failure.key).join(", ");
+        const detail = failures[0].message;
+        const message = nowHasData
+          ? `Could not refresh ${labels}. Showing the last loaded data. ${detail}`
+          : `Could not load ${labels} from the server. ${detail}`;
+        catalogErrorRef.current = message;
+        setCatalogError(message);
+      } else {
+        catalogErrorRef.current = "";
+        setCatalogError("");
+      }
+    })()
+      .catch((error) => {
+        // Safety net: catalog loading should never produce an unhandled rejection.
+        if (!mountedRef.current || requestId !== requestIdRef.current) return;
+        const message = error?.message || "Failed to load data from the server.";
+        catalogErrorRef.current = message;
+        setCatalogError(message);
+      })
+      .finally(() => {
+        if (inFlightRef.current === request) inFlightRef.current = null;
+        if (mountedRef.current && requestId === requestIdRef.current) {
+          setCatalogLoading(false);
+        }
+      });
+
+    inFlightRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
     loadCatalog();
+  }, [loadCatalog]);
+
+  const refreshCatalog = useCallback(() => loadCatalog({ force: true }), [loadCatalog]);
+
+  // Recover automatically after the browser comes back online, or when the
+  // tab becomes visible again after a failed/stale load (avoids manual refresh).
+  useEffect(() => {
+    const handleOnline = () => loadCatalog();
+    const handleVisibility = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "visible") return;
+      const sinceAttempt = Date.now() - lastAttemptAtRef.current;
+      const threshold = catalogErrorRef.current
+        ? CATALOG_RETRY_ON_VISIBLE_MS
+        : CATALOG_STALE_MS;
+      if (sinceAttempt >= threshold) loadCatalog();
+    };
+    window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [loadCatalog]);
 
   // Restore session from backend if a token exists.
@@ -193,7 +375,7 @@ export function DemoProvider({ children }) {
 
   const resetDemoData = useCallback(() => {
     setAppointments([]);
-    loadCatalog();
+    loadCatalog({ force: true });
   }, [loadCatalog]);
 
   const value = useMemo(
@@ -210,7 +392,7 @@ export function DemoProvider({ children }) {
       authLoading,
       catalogLoading,
       catalogError,
-      refreshCatalog: loadCatalog,
+      refreshCatalog,
       login,
       register,
       logout,
@@ -235,7 +417,7 @@ export function DemoProvider({ children }) {
       authLoading,
       catalogLoading,
       catalogError,
-      loadCatalog,
+      refreshCatalog,
       login,
       register,
       logout,

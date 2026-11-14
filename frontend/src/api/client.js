@@ -27,37 +27,103 @@ export function clearToken() {
   setToken(null);
 }
 
-export async function apiRequest(path, options = {}) {
-  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
-  const token = getToken();
+// Default request budget. Render free instances can take a while to wake up,
+// so keep this generous but bounded.
+const DEFAULT_TIMEOUT_MS = 20000;
+const DEFAULT_RETRIES = 2;
+const BASE_RETRY_DELAY_MS = 600;
 
-  const headers = {
-    ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-    ...(options.headers || {}),
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isIdempotentMethod(method) {
+  const verb = String(method || "GET").toUpperCase();
+  return verb === "GET" || verb === "HEAD";
+}
+
+function isRetryableError(error) {
+  if (!error || error.aborted) return false;
+  const status = Number(error.status);
+  if (status === 0 || status === 408 || status === 429) return true;
+  return status >= 500 && status <= 599;
+}
+
+async function readResponseBody(res) {
+  // 204/205 have no body and are valid empty responses.
+  if (res.status === 204 || res.status === 205) {
+    return { data: null, isJson: true, raw: "" };
+  }
+
+  const contentType = res.headers.get("content-type") || "";
+  if (contentType.includes("application/json") || contentType.includes("+json")) {
+    const text = await res.text();
+    if (!text) return { data: null, isJson: true, raw: "" };
+    try {
+      return { data: JSON.parse(text), isJson: true, raw: text };
+    } catch {
+      return { data: null, isJson: false, raw: text };
+    }
+  }
+
+  const text = await res.text().catch(() => "");
+  return { data: text || null, isJson: false, raw: text };
+}
+
+async function performRequest(url, fetchOptions, headers, timeout) {
+  const controller = new AbortController();
+  const externalSignal = fetchOptions.signal;
+  let timedOut = false;
+  let timer = null;
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+  if (timeout > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeout);
+  }
 
   let res;
+  let body;
   try {
-    res = await fetch(url, { ...options, headers });
-  } catch (err) {
-    const error = new Error("Cannot reach the server. Please make sure the backend API is running (port 5000) and try again.");
-    error.cause = err;
-    error.status = 0;
-    throw error;
+    try {
+      res = await fetch(url, { ...fetchOptions, headers, signal: controller.signal });
+      body = await readResponseBody(res);
+    } catch (err) {
+      if (externalSignal?.aborted) {
+        const error = new Error("Request was cancelled.");
+        error.name = "AbortError";
+        error.aborted = true;
+        error.status = 0;
+        throw error;
+      }
+      if (timedOut) {
+        const error = new Error(
+          `The server took too long to respond (${Math.round(timeout / 1000)}s). It may be starting up — please try again.`
+        );
+        error.status = 0;
+        error.code = "TIMEOUT";
+        error.cause = err;
+        throw error;
+      }
+      const error = new Error(
+        "Cannot reach the server. Please make sure the backend API is running (port 5000) and try again."
+      );
+      error.cause = err;
+      error.status = 0;
+      throw error;
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
   }
 
-  let data = null;
-  const contentType = res.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
-    }
-  } else {
-    data = await res.text().catch(() => null);
-  }
+  const data = body.data;
 
   if (res.status === 401) {
     clearToken();
@@ -81,7 +147,62 @@ export async function apiRequest(path, options = {}) {
     throw error;
   }
 
+  // A successful status with an HTML/text body almost always means the API
+  // base URL is wrong (e.g. pointing at a static site/proxy), not empty data.
+  if (!body.isJson) {
+    const error = new Error(
+      "The API returned an unexpected response instead of JSON. Check that VITE_API_BASE points to the backend API URL (it must include /api)."
+    );
+    error.status = res.status;
+    error.code = "INVALID_RESPONSE";
+    error.data = data;
+    throw error;
+  }
+
   return data;
+}
+
+export async function apiRequest(path, options = {}) {
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const {
+    timeout = DEFAULT_TIMEOUT_MS,
+    retries,
+    retryDelay = BASE_RETRY_DELAY_MS,
+    ...fetchOptions
+  } = options;
+
+  const headers = {
+    ...(fetchOptions.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+    ...(fetchOptions.headers || {}),
+  };
+
+  const method = fetchOptions.method || "GET";
+  const maxRetries =
+    Number.isInteger(retries) && retries >= 0
+      ? retries
+      : isIdempotentMethod(method)
+        ? DEFAULT_RETRIES
+        : 0;
+
+  for (let attempt = 0; ; attempt += 1) {
+    // Re-read the token each attempt so a login during a retry is respected.
+    const token = getToken();
+    const attemptHeaders = { ...headers };
+    if (token) attemptHeaders.Authorization = `Bearer ${token}`;
+
+    try {
+      return await performRequest(url, fetchOptions, attemptHeaders, timeout);
+    } catch (error) {
+      const canRetry =
+        attempt < maxRetries &&
+        isRetryableError(error) &&
+        !fetchOptions.signal?.aborted;
+      if (!canRetry) throw error;
+
+      const backoff = retryDelay * 2 ** attempt + Math.random() * 250;
+      await delay(backoff);
+    }
+  }
 }
 
 // Upload a FormData payload with real browser upload progress.

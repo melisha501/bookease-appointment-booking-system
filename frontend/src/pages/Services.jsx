@@ -12,12 +12,14 @@ export default function Services() {
   const { services, categories, catalogLoading, catalogError, refreshCatalog } = useDemo();
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
+  const serviceList = Array.isArray(services) ? services : [];
 
   // Filter: search text matches name/description, category must match.
-  const filtered = services.filter((service) => {
+  const filtered = serviceList.filter((service) => {
+    const term = search.toLowerCase();
     const matchesSearch =
-      service.name.toLowerCase().includes(search.toLowerCase()) ||
-      service.description.toLowerCase().includes(search.toLowerCase());
+      (service.name || '').toLowerCase().includes(term) ||
+      (service.description || '').toLowerCase().includes(term);
     const matchesCategory =
       activeCategory === 'all' || service.category === activeCategory;
     return matchesSearch && matchesCategory;
@@ -67,34 +69,54 @@ export default function Services() {
 
       {/* Results */}
       <div className="mt-10">
-        {catalogLoading ? (
+        {catalogLoading && serviceList.length === 0 ? (
           <p className="text-center text-sm text-ink-soft">Loading services…</p>
-        ) : catalogError ? (
-          <EmptyState title="Could not load services" description={catalogError} icon={Search}>
-            <Button onClick={refreshCatalog} variant="secondary">Try again</Button>
-          </EmptyState>
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            title="No services found"
-            description="Try a different search word or choose another category."
-            icon={Search}
-          >
-            <Button
-              onClick={() => {
-                setSearch('');
-                setActiveCategory('all');
-              }}
-              variant="secondary"
-            >
-              Clear filters
-            </Button>
-          </EmptyState>
+        ) : serviceList.length === 0 ? (
+          catalogError ? (
+            <EmptyState title="Could not load services" description={catalogError} icon={Search}>
+              <Button onClick={refreshCatalog} variant="secondary">Try again</Button>
+            </EmptyState>
+          ) : (
+            <EmptyState
+              title="No services available"
+              description="The service catalog is empty right now. Please check back later."
+              icon={Search}
+            />
+          )
         ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filtered.map((service) => (
-              <ServiceCard key={service.id} service={service} />
-            ))}
-          </div>
+          <>
+            {catalogError ? (
+              <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Some services could not be refreshed. {catalogError}{' '}
+                <button type="button" onClick={refreshCatalog} className="font-semibold underline">
+                  Retry
+                </button>
+              </div>
+            ) : null}
+            {filtered.length === 0 ? (
+              <EmptyState
+                title="No services found"
+                description="Try a different search word or choose another category."
+                icon={Search}
+              >
+                <Button
+                  onClick={() => {
+                    setSearch('');
+                    setActiveCategory('all');
+                  }}
+                  variant="secondary"
+                >
+                  Clear filters
+                </Button>
+              </EmptyState>
+            ) : (
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {filtered.map((service) => (
+                  <ServiceCard key={service.id} service={service} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -11,6 +11,7 @@ import { useDemo } from '../store/DemoContext';
 
 export default function AdminCategories() {
   const { categories, services, refreshCatalog } = useDemo();
+  const customCategories = (Array.isArray(categories) ? categories : []).filter((c) => c.id !== 'all');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
@@ -59,7 +60,7 @@ export default function AdminCategories() {
     <div className="grid gap-6 lg:grid-cols-5">
       <Card padding="p-0" className="overflow-hidden lg:col-span-3">
         <div className="px-5 py-4">
-          <h3 className="text-base font-bold text-ink">All Categories ({categories.length})</h3>
+          <h3 className="text-base font-bold text-ink">All Categories ({customCategories.length})</h3>
           {status.message ? (
             <p role="status" className={`mt-1 text-xs font-semibold ${status.type === 'error' ? 'text-red-600' : status.type === 'warning' ? 'text-amber-700' : status.type === 'success' ? 'text-teal-deep' : 'text-ink-soft'}`}>{status.message}</p>
           ) : null}
@@ -91,6 +92,13 @@ export default function AdminCategories() {
                   </td>
                 </tr>
               ))}
+              {customCategories.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-5 py-8 text-center text-sm text-ink-soft">
+                    No custom categories yet. Add one using the form.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>

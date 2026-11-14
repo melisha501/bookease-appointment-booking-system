@@ -28,8 +28,18 @@ const EMPTY_FORM = {
 
 export default function AdminProviders() {
   const { specialists, categories, refreshCatalog } = useDemo();
+  const specialtyOptions = (Array.isArray(categories) ? categories : [])
+    .filter((c) => c.id !== 'all')
+    .map((c) => c.name);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editing, setEditing] = useState(false);
+  // Keep the new-specialist form on a specialty that exists in the live
+  // catalog instead of the stale built-in default.
+  const effectiveSpecialty = editing
+    ? form.specialty
+    : specialtyOptions.includes(form.specialty)
+      ? form.specialty
+      : specialtyOptions[0] || '';
   const [note, setNote] = useState('');
   const [imageFile, setImageFile] = useState(null);
   const [imageBusy, setImageBusy] = useState(false);
@@ -119,6 +129,22 @@ export default function AdminProviders() {
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) return;
+
+    // Keep specialty in sync with the live category list; fall back to the
+    // first category for a new specialist instead of a stale default.
+    const specialty =
+      specialtyOptions.find((name) => name === effectiveSpecialty) ||
+      (editing ? '' : specialtyOptions[0] || '');
+    if (!specialty) {
+      setImageStatus({
+        type: 'error',
+        message: editing
+          ? 'Choose a valid specialty before saving.'
+          : 'Create a category before adding a specialist.',
+      });
+      return;
+    }
+
     setImageBusy(true);
     setImageProgress(0);
     let savedRecord = null;
@@ -129,7 +155,7 @@ export default function AdminProviders() {
       const payload = {
         name: form.name,
         title: form.title,
-        specialty: form.specialty,
+        specialty,
         experience: Number(form.experience) || 0,
         rating: Number(form.rating) || 4.8,
       };
@@ -239,7 +265,13 @@ export default function AdminProviders() {
               </tr>
             </thead>
             <tbody>
-              {specialists.map((s) => (
+              {specialists.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-5 py-10 text-center text-sm text-ink-soft">
+                    No specialists yet. Add your first specialist using the form.
+                  </td>
+                </tr>
+              ) : specialists.map((s) => (
                 <tr key={s.id} className="border-b border-line last:border-0 hover:bg-surface">
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
@@ -285,8 +317,11 @@ export default function AdminProviders() {
           </div>
           <div>
             <label htmlFor="sp-spec" className="mb-1.5 block text-sm font-semibold text-ink">Specialty (category)</label>
-            <select id="sp-spec" value={form.specialty} onChange={(e) => update('specialty', e.target.value)} className={inputClassName}>
-              {categories.filter((c) => c.id !== 'all').map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+            <select id="sp-spec" value={effectiveSpecialty} onChange={(e) => update('specialty', e.target.value)} className={inputClassName}>
+              {!specialtyOptions.includes(effectiveSpecialty) ? (
+                <option value={effectiveSpecialty} disabled>Select a specialty…</option>
+              ) : null}
+              {specialtyOptions.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-3">

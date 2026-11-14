@@ -27,6 +27,7 @@ export default function CustomerOverview() {
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
   const displayName = user?.name || 'Customer';
 
   useEffect(() => {
@@ -47,7 +48,7 @@ export default function CustomerOverview() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   const { total, upcoming, completed, cancelled, rejected, nextAppointment, recent } = useMemo(() => {
     const list = Array.isArray(appointments) ? appointments : [];
@@ -74,16 +75,27 @@ export default function CustomerOverview() {
           {upcoming > 0 ? `You have ${upcoming} upcoming appointment${upcoming === 1 ? '' : 's'}. Manage them below.` : 'No upcoming appointments. Book your next session today.'}
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
-          <Button to="/booking" className="bg-white text-teal-deep hover:bg-teal-50">
+          <Button to="/booking" variant="light">
             <Plus className="h-4 w-4" /> Book Appointment
           </Button>
-          <Button to="/customer/appointments" variant="secondary" className="border-white/30 bg-transparent text-white hover:bg-white/10 hover:text-white">
+          <Button to="/customer/appointments" variant="onDark">
             View My Appointments
           </Button>
         </div>
       </div>
 
-      {error ? <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">{error}</p> : null}
+      {error ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => setReloadKey((key) => key + 1)}
+            className="font-semibold underline"
+          >
+            Try again
+          </button>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard title="Total Appointments" value={loading ? '—' : total} subtitle="All bookings" icon={CalendarDays} />

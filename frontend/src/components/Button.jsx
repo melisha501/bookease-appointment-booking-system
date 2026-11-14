@@ -2,7 +2,7 @@
 // Props:
 // - children, onClick, type, disabled
 // - to: if provided, renders a <Link> (for navigation) instead of a <button>
-// - variant: "primary" | "secondary" | "ghost" | "soft"
+// - variant: "primary" | "secondary" | "soft" | "ghost" | "cta" | "light" | "onDark" | "danger"
 // - size: "sm" | "md" | "lg"
 // - fullWidth: true for full-width buttons (e.g. forms)
 
@@ -17,6 +17,21 @@ const variants = {
     'bg-teal-50 text-teal-deep hover:-translate-y-0.5 hover:bg-teal-100 active:translate-y-0 disabled:translate-y-0 disabled:bg-slate-100 disabled:text-slate-400',
   ghost:
     'text-teal-deep hover:bg-teal-50 disabled:text-slate-400',
+  // High-visibility teal CTA for use on dark/teal backgrounds. Self-contained
+  // so callers never need className color overrides (which can lose Tailwind's
+  // cascade order and leave the label invisible). Uses deep brand teal so the
+  // white label keeps a 5.4:1 contrast ratio (the brighter teal-brand is 2.5:1).
+  cta:
+    'border-2 border-teal-glow/70 bg-teal-deep text-white shadow-[0_12px_30px_-14px_rgba(20,184,166,0.85)] hover:-translate-y-0.5 hover:bg-teal-800 hover:shadow-[0_18px_36px_-16px_rgba(45,212,191,0.9)] active:translate-y-0 focus-visible:ring-white/30 disabled:translate-y-0 disabled:border-transparent disabled:bg-slate-300 disabled:text-slate-500 disabled:shadow-none',
+  // Light CTA for use on dark/teal backgrounds (self-contained so callers
+  // don't need className overrides that can lose Tailwind's cascade order).
+  light:
+    'bg-white text-teal-deep shadow-[0_8px_20px_-10px_rgba(0,0,0,0.35)] hover:-translate-y-0.5 hover:bg-teal-50 hover:shadow-[0_14px_28px_-14px_rgba(0,0,0,0.45)] active:translate-y-0 disabled:translate-y-0 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none',
+  // Outline CTA for use on dark/teal backgrounds.
+  onDark:
+    'border border-white/30 bg-transparent text-white hover:-translate-y-0.5 hover:border-white/50 hover:bg-white/10 active:translate-y-0 disabled:translate-y-0 disabled:border-white/20 disabled:text-white/60',
+  danger:
+    'border border-red-200 bg-white text-red-600 hover:-translate-y-0.5 hover:border-red-300 hover:bg-red-50 active:translate-y-0 disabled:translate-y-0 disabled:border-slate-200 disabled:text-slate-400 disabled:bg-white',
 };
 
 const sizes = {

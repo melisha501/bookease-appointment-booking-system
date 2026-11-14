@@ -21,30 +21,42 @@ export default function Specialists() {
       </div>
 
       <div className="mt-10">
-        {catalogLoading ? (
+        {catalogLoading && list.length === 0 ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="h-[420px] animate-pulse rounded-2xl border border-line bg-white" />
             ))}
           </div>
-        ) : catalogError ? (
-          <EmptyState title="Could not load specialists" description={catalogError}>
-            <Button onClick={refreshCatalog} variant="secondary">Try again</Button>
-          </EmptyState>
         ) : list.length === 0 ? (
-          <EmptyState title="No specialists available" description="Please check back later." />
+          catalogError ? (
+            <EmptyState title="Could not load specialists" description={catalogError}>
+              <Button onClick={refreshCatalog} variant="secondary">Try again</Button>
+            </EmptyState>
+          ) : (
+            <EmptyState title="No specialists available" description="Please check back later." />
+          )
         ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {list.map((specialist) => (
-              <SpecialistCard
-                key={specialist.id}
-                specialist={specialist}
-                serviceNames={(Array.isArray(specialist.serviceIds) ? specialist.serviceIds : [])
-                  .map((id) => serviceMap.get(id))
-                  .filter(Boolean)}
-              />
-            ))}
-          </div>
+          <>
+            {catalogError ? (
+              <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Some specialist data could not be refreshed. {catalogError}{' '}
+                <button type="button" onClick={refreshCatalog} className="font-semibold underline">
+                  Retry
+                </button>
+              </div>
+            ) : null}
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {list.map((specialist) => (
+                <SpecialistCard
+                  key={specialist.id}
+                  specialist={specialist}
+                  serviceNames={(Array.isArray(specialist.serviceIds) ? specialist.serviceIds : [])
+                    .map((id) => serviceMap.get(id))
+                    .filter(Boolean)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
