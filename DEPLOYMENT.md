@@ -245,7 +245,7 @@ The repository includes `render.yaml`.
 | --- | --- |
 | `DATABASE_URL` | Neon/Supabase connection string |
 | `FRONTEND_URL` | Your Vercel URL (you can use a temporary value now and update it after step 5) |
-| `CORS_ORIGINS` | Optional extra origins, comma-separated |
+| `CORS_ORIGINS` | Optional extra origins, comma-separated (production alias and this project's preview URLs are already handled) |
 | `APP_URL` | Deployed frontend URL used in email links (recommended; falls back to `FRONTEND_URL`) |
 | `RESEND_API_KEY` | Your Resend key |
 | `RESEND_FROM_EMAIL` | Verified sender, e.g. `BookEase <no-reply@yourdomain.com>` (required in production) |
@@ -346,23 +346,45 @@ If you see `503`, the API is running but the database is not reachable. Check `D
 
 ### 5.1 Update backend CORS
 
-After Vercel gives you the production URL (for example `https://bookease.vercel.app`):
+CORS is an allowlist with one generated exception: Vercel preview deployments of
+**this project and team**. Set the primary origin after Vercel gives you the
+production URL:
 
 1. Go to Render → your service → **Environment**.
 2. Set:
 
 ```text
-FRONTEND_URL=https://bookease.vercel.app
-CORS_ORIGINS=https://bookease.vercel.app
+FRONTEND_URL=https://bookease-appointment-booking-system.vercel.app
 ```
 
-3. If you use a custom domain, add it too:
+3. Optional: add a custom domain or extra origin:
 
 ```text
-CORS_ORIGINS=https://bookease.vercel.app,https://www.yourdomain.com
+CORS_ORIGINS=https://www.yourdomain.com
 ```
 
-4. Save and redeploy the backend.
+4. Optional: override the preview project/team slugs if the Vercel project moves.
+   The defaults are `bookease-appointment-booking-system` and `melisha`:
+
+```text
+VERCEL_PREVIEW_PROJECT=bookease-appointment-booking-system
+VERCEL_PREVIEW_TEAM=melisha
+ALLOW_VERCEL_PREVIEWS=true
+```
+
+With the defaults, these are accepted automatically without listing each URL:
+
+```text
+https://bookease-appointment-booking-system.vercel.app                     (production alias)
+https://bookease-appointment-booking-system-git-main-melisha.vercel.app     (git main alias)
+https://bookease-appointment-booking-system-<deployment-id>-melisha.vercel.app (unique previews)
+```
+
+The preview rule is a strict project + team hostname pattern, not a
+`*.vercel.app` wildcard, so unrelated Vercel projects remain blocked.
+
+5. Save and redeploy the backend. Environment changes do not apply to the
+   running instance until the service restarts.
 
 ### 5.2 Verify the frontend
 
@@ -501,6 +523,7 @@ Do not report the deployment as successful until these pass.
 - [ ] Neon/Supabase credentials are stored only in Render.
 - [ ] Resend and UploadThing keys are stored only in Render.
 - [ ] `FRONTEND_URL` and `CORS_ORIGINS` contain only your real frontend origins.
+- [ ] A Vercel preview URL (`<project>-<id>-<team>.vercel.app`) can load `/api/services`.
 - [ ] `TRUST_PROXY=1` is set on Render so rate limiting sees real client IPs.
 - [ ] Login/registration rate limiting returns `429` after repeated failures.
 - [ ] Security headers (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, HSTS) are present on API responses.
@@ -518,7 +541,7 @@ Do not report the deployment as successful until these pass.
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Frontend shows "Cannot reach the server" | Wrong `VITE_API_BASE` or backend asleep | Check the URL includes `/api`; open it in a browser; wait for Render cold start. |
-| Browser CORS error | `FRONTEND_URL` does not match the Vercel origin | Set the exact `https://...vercel.app` origin in Render and redeploy. |
+| Browser CORS error | `FRONTEND_URL` does not match the Vercel origin, or the preview belongs to a different project/team | Set the exact `https://...vercel.app` origin in Render, or set `VERCEL_PREVIEW_PROJECT`/`VERCEL_PREVIEW_TEAM` to the project's slugs, then redeploy the backend. |
 | `/api/health` returns `503` | Database unreachable or migrations missing | Check `DATABASE_URL`, Neon status, and run `npm run db:deploy`. |
 | `PrismaClientInitializationError` | Bad connection string or generated client missing | Verify the URL and run `npm run db:generate`; check Render build logs. |
 | Render build fails at `prisma migrate deploy` | Database not reachable from the build environment or wrong URL | Use the Neon direct connection; confirm the database allows external connections. |

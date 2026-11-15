@@ -389,7 +389,8 @@ Repeat after every deployment.
 - [ ] `JWT_SECRET` is long and random.
 - [ ] The production admin password is not the default `Admin@123`.
 - [ ] Resend and UploadThing keys are only in Render.
-- [ ] CORS allows only the real frontend origins.
+- [ ] CORS allows only the real frontend origins and this project's own Vercel preview URLs.
+- [ ] `OPTIONS /api/services` returns `204` with `Access-Control-Allow-Origin` for each allowed frontend origin.
 - [ ] Any key exposed during testing has been rotated.
 
 ---

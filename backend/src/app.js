@@ -4,6 +4,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const path = require("path");
 
+const { createCorsPolicy } = require("./config/cors");
 const healthRoutes = require("./routes/health");
 const authRoutes = require("./routes/auth");
 const categoryRoutes = require("./routes/categories");
@@ -50,43 +51,49 @@ app.use(
   })
 );
 
-// CORS: allow the deployed frontend plus local development.
+// CORS: explicit allowlist plus this project's own Vercel preview deployments.
 // FRONTEND_URL is the primary origin; CORS_ORIGINS accepts a comma-separated
-// list (useful for a custom domain and a Vercel preview URL at the same time).
-// Requests without an Origin header (Render health checks, curl, server-to-server)
-// are always allowed because they are not subject to browser CORS.
-function parseOriginList(value) {
-  return String(value || "")
-    .split(",")
-    .map((origin) => origin.trim().replace(/\/$/, ""))
-    .filter(Boolean);
-}
+// list (custom domain, production alias, git-main alias). Preview hosts are
+// matched against a strict project + team pattern in config/cors.js - never a
+// bare *.vercel.app wildcard. Requests without an Origin header (Render health
+// checks, curl, server-to-server) are always allowed because they are not
+// subject to browser CORS.
+const corsPolicy = createCorsPolicy();
+const corsOptions = {
+  origin(origin, callback) {
+    return callback(null, corsPolicy.isAllowedOrigin(origin));
+  },
+  credentials: true,
+  methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  optionsSuccessStatus: 204,
+  maxAge: 86400,
+};
 
-const configuredOrigins = [
-  ...parseOriginList(process.env.FRONTEND_URL),
-  ...parseOriginList(process.env.CORS_ORIGINS),
-];
-const allowedOrigins = configuredOrigins.length
-  ? [...new Set(configuredOrigins)]
-  : ["http://localhost:5173", "http://127.0.0.1:5173"];
+// The response depends on the request Origin, so tell caches about it even when
+// the origin is rejected (the `cors` package skips Vary for rejected origins).
+app.use((req, res, next) => {
+  res.vary("Origin");
+  return next();
+});
 
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      // Optional: allow any Vercel preview deployment for this project.
-      if (
-        process.env.ALLOW_VERCEL_PREVIEWS === "true" &&
-        /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
-      ) {
-        return callback(null, true);
-      }
-      return callback(null, false);
-    },
-    credentials: true,
-  })
-);
+// Reject disallowed preflights explicitly instead of falling through to a 200
+// with no CORS headers. Allowed preflights are answered by `cors` with 204.
+app.use((req, res, next) => {
+  if (
+    req.method === "OPTIONS" &&
+    req.headers.origin &&
+    !corsPolicy.isAllowedOrigin(req.headers.origin)
+  ) {
+    return res.status(403).json({
+      success: false,
+      message: "Origin is not allowed by CORS.",
+    });
+  }
+  return next();
+});
+
+// Must run before the API routes so JSON errors also carry CORS headers.
+app.use(cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 // Legacy static files only. New admin image uploads go to UploadThing and are
 // stored in PostgreSQL as absolute URLs. This route keeps any pre-existing

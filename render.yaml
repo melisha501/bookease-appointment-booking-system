@@ -37,6 +37,12 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: ALLOW_VERCEL_PREVIEWS
+        value: "true"
+      - key: VERCEL_PREVIEW_PROJECT
+        value: bookease-appointment-booking-system
+      - key: VERCEL_PREVIEW_TEAM
+        value: melisha
       - key: RESEND_API_KEY
         sync: false
       - key: RESEND_FROM_EMAIL

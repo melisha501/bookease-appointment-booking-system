@@ -223,7 +223,9 @@ Never commit real credentials. All backend secrets belong in `backend/.env` loca
 | `TRUST_PROXY` | No | Reverse-proxy hops trusted for client IPs; defaults to `1` in production and `false` locally | `1` |
 | `FRONTEND_URL` | Yes | Primary allowed CORS origin and default app URL | `https://your-app.vercel.app` |
 | `CORS_ORIGINS` | No | Extra comma-separated allowed origins | `https://www.yourdomain.com,https://your-app.vercel.app` |
-| `ALLOW_VERCEL_PREVIEWS` | No | Allow any `*.vercel.app` preview origin | `false` |
+| `ALLOW_VERCEL_PREVIEWS` | No | Allow this project's Vercel preview URLs (`<project>-<deployment-or-branch>-<team>.vercel.app`); defaults to `true` | `true` |
+| `VERCEL_PREVIEW_PROJECT` | No | Vercel project name used for the preview host pattern | `bookease-appointment-booking-system` |
+| `VERCEL_PREVIEW_TEAM` | No | Vercel team/scope slug used for the preview host pattern | `melisha` |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | No | Login/registration rate-limit window (default 15 min) | `900000` |
 | `AUTH_RATE_LIMIT_LOGIN_MAX` | No | Failed logins allowed per IP per window (default 10) | `10` |
 | `AUTH_RATE_LIMIT_REGISTER_MAX` | No | Registrations allowed per IP per window (default 5) | `5` |
@@ -651,7 +653,7 @@ Beginner-friendly step-by-step instructions are in [`DEPLOYMENT.md`](./DEPLOYMEN
 5. Run `npm run db:deploy` and `npm run db:seed` against the production database.
 6. Import the repository into Vercel with root directory `frontend`.
 7. Set `VITE_API_BASE=https://<your-render-service>.onrender.com/api` in Vercel and redeploy.
-8. Update `FRONTEND_URL`/`CORS_ORIGINS` in Render with the Vercel URL and redeploy the backend.
+8. Update `FRONTEND_URL` in Render with the Vercel production URL and redeploy the backend. This project's Vercel preview and git-main URLs are allowed automatically by the strict project/team hostname rule.
 9. Verify `https://<your-render-service>.onrender.com/api/health`.
 10. Run `npm run smoke` against the live API and complete [`TESTING.md`](./TESTING.md).
 
