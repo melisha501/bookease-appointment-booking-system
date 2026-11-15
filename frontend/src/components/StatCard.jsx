@@ -1,33 +1,39 @@
-// StatCard — a small dashboard-style stat tile (icon, label, big number).
-// Used later in Customer/Admin overviews. Ready to reuse now.
-//
-// Props:
-// - title: label, e.g. "Upcoming Appointments"
-// - value: big number/text
-// - subtitle: small text under value (optional)
-// - icon: a lucide icon component, e.g. <CalendarDays />
-// - trend: small text chip, e.g. "+3 this week" (optional)
+// StatCard — dashboard metric tile with an icon, value, and supporting label.
 
-export default function StatCard({ title, value, subtitle, icon: Icon, trend }) {
+const tones = {
+  teal: 'bg-teal-50 text-teal-deep ring-teal-100/70',
+  amber: 'bg-amber-50 text-amber-700 ring-amber-100',
+  emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+  slate: 'bg-slate-100 text-slate-600 ring-slate-200/70',
+  rose: 'bg-rose-50 text-rose-700 ring-rose-100',
+};
+
+export default function StatCard({ title, value, subtitle, icon: Icon, trend, tone = 'teal' }) {
   return (
-    <div className="rounded-2xl border border-line bg-white p-5 shadow-sm sm:p-6">
+    <div className="group rounded-2xl border border-line/90 bg-white p-5 shadow-card transition duration-200 hover:-translate-y-0.5 hover:shadow-soft sm:p-6">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-ink-soft">{title}</p>
-          <p className="mt-1 text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold text-ink-soft">{title}</p>
+          <p className="mt-1.5 font-display text-2xl font-bold tracking-tight text-ink sm:text-[1.75rem]">
             {value}
           </p>
-          {subtitle && <p className="mt-1 text-sm text-ink-soft">{subtitle}</p>}
+          {subtitle ? <p className="mt-1 text-xs leading-relaxed text-ink-soft">{subtitle}</p> : null}
         </div>
 
-        {Icon && (
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-deep">
-            <Icon className="h-5 w-5" />
+        {Icon ? (
+          <span
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ${tones[tone] || tones.teal}`}
+          >
+            <Icon className="h-5 w-5" aria-hidden="true" />
           </span>
-        )}
+        ) : null}
       </div>
 
-      {trend && <p className="mt-3 text-xs font-semibold text-teal-deep">{trend}</p>}
+      {trend ? (
+        <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-1 text-[11px] font-bold text-teal-deep">
+          {trend}
+        </p>
+      ) : null}
     </div>
   );
 }

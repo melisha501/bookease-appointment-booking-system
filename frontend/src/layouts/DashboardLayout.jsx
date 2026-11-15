@@ -3,8 +3,6 @@
 //
 // Customer and Admin use SEPARATE menu items, so they stay separate
 // dashboards while sharing ONE layout component.
-// Usage:
-//   <DashboardLayout items={items} title="…" roleLabel="Customer"> … </DashboardLayout>
 
 import { useState } from 'react';
 import Sidebar from '../components/Sidebar';
@@ -22,7 +20,6 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-surface">
-      {/* Sidebar (desktop + mobile drawer) */}
       <Sidebar
         items={items}
         isOpen={sidebarOpen}
@@ -30,7 +27,6 @@ export default function DashboardLayout({
         roleLabel={roleLabel}
       />
 
-      {/* Main column — pushed right on desktop to make room for fixed sidebar */}
       <div className="flex min-h-screen flex-col md:pl-64">
         <Topbar
           title={title}
@@ -40,7 +36,7 @@ export default function DashboardLayout({
           onMenuClick={() => setSidebarOpen(true)}
         />
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
           <div className="mx-auto max-w-6xl animate-fade-up">{children}</div>
         </main>
       </div>

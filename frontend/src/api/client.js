@@ -28,9 +28,11 @@ export function clearToken() {
 }
 
 // Default request budget. Render free instances can take a while to wake up,
-// so keep this generous but bounded.
+// so keep this generous but bounded. Individual calls can override both the
+// timeout and the retry count (auth calls use a longer timeout, catalogs use
+// fewer retries so a cold start cannot stall the first paint for a minute).
 const DEFAULT_TIMEOUT_MS = 20000;
-const DEFAULT_RETRIES = 2;
+const DEFAULT_RETRIES = 1;
 const BASE_RETRY_DELAY_MS = 600;
 
 function delay(ms) {
@@ -280,11 +282,15 @@ export function postFormWithProgress(path, formData, onProgress) {
 }
 
 export const api = {
-  get: (path) => apiRequest(path),
-  post: (path, body) => apiRequest(path, { method: "POST", body: JSON.stringify(body) }),
-  postForm: (path, formData) => apiRequest(path, { method: "POST", body: formData }),
+  get: (path, options) => apiRequest(path, options),
+  post: (path, body, options) =>
+    apiRequest(path, { ...options, method: "POST", body: JSON.stringify(body) }),
+  postForm: (path, formData, options) =>
+    apiRequest(path, { ...options, method: "POST", body: formData }),
   postFormWithProgress,
-  put: (path, body) => apiRequest(path, { method: "PUT", body: JSON.stringify(body) }),
-  patch: (path, body) => apiRequest(path, { method: "PATCH", body: JSON.stringify(body) }),
-  del: (path) => apiRequest(path, { method: "DELETE" }),
+  put: (path, body, options) =>
+    apiRequest(path, { ...options, method: "PUT", body: JSON.stringify(body) }),
+  patch: (path, body, options) =>
+    apiRequest(path, { ...options, method: "PATCH", body: JSON.stringify(body) }),
+  del: (path, options) => apiRequest(path, { ...options, method: "DELETE" }),
 };

@@ -137,8 +137,13 @@ export function DemoProvider({ children }) {
       ];
 
       // Settle each endpoint independently: one failing request must not wipe
-      // out data from the other successful endpoints.
-      const results = await Promise.allSettled(resources.map((item) => api.get(item.path)));
+      // out data from the other successful endpoints. The bounded timeout and
+      // single retry keep a cold backend from stalling the first paint.
+      const results = await Promise.allSettled(
+        resources.map((item) =>
+          api.get(item.path, { timeout: 12000, retries: 1 })
+        )
+      );
 
       // Ignore stale responses if a newer load was started.
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
@@ -243,7 +248,8 @@ export function DemoProvider({ children }) {
     };
   }, [loadCatalog]);
 
-  // Restore session from backend if a token exists.
+  // Restore session from backend if a token exists. The request is bounded so
+  // a sleeping backend can never leave the app stuck on "Checking session".
   useEffect(() => {
     let alive = true;
     async function restore() {
@@ -253,10 +259,13 @@ export function DemoProvider({ children }) {
         return;
       }
       try {
-        const data = await api.get("/auth/me");
+        const data = await api.get("/auth/me", { timeout: 15000, retries: 0 });
         if (alive) setUser(data.user || null);
-      } catch {
-        clearToken();
+      } catch (error) {
+        // Only discard the token when the server explicitly rejects it. A
+        // timeout/network error means the API is starting up, so keep the
+        // token for the next load instead of silently logging the user out.
+        if (error?.status === 401) clearToken();
         if (alive) setUser(null);
       } finally {
         if (alive) setAuthLoading(false);
@@ -272,14 +281,22 @@ export function DemoProvider({ children }) {
 
   // ---- Real auth (backend API) ----
   const login = useCallback(async ({ email, password }) => {
-    const data = await api.post("/auth/login", { email, password });
+    const data = await api.post(
+      "/auth/login",
+      { email, password },
+      { timeout: 30000, retries: 0 }
+    );
     if (data.token) setToken(data.token);
     setUser(data.user || null);
     return data;
   }, []);
 
   const register = useCallback(async ({ name, email, phone, password }) => {
-    const data = await api.post("/auth/register", { name, email, phone, password });
+    const data = await api.post(
+      "/auth/register",
+      { name, email, phone, password },
+      { timeout: 30000, retries: 0 }
+    );
     if (data.token) setToken(data.token);
     setUser(data.user || null);
     return data;
@@ -287,7 +304,7 @@ export function DemoProvider({ children }) {
 
   const logout = useCallback(async () => {
     try {
-      await api.post("/auth/logout", {});
+      await api.post("/auth/logout", {}, { timeout: 6000, retries: 0 });
     } catch {
       // stateless logout; ignore network errors
     }
@@ -296,7 +313,7 @@ export function DemoProvider({ children }) {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    const data = await api.get("/auth/me");
+    const data = await api.get("/auth/me", { timeout: 15000, retries: 0 });
     setUser(data.user || null);
     return data.user;
   }, []);

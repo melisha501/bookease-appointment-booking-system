@@ -1,9 +1,19 @@
-// Topbar — top bar inside DASHBOARD pages. Shows title, user chip + Logout.
-// Uses the authenticated backend session.
+// Topbar — top bar inside DASHBOARD pages. Shows page title, user chip and Logout.
+// The old decorative search box and notification bell were removed because they
+// were not connected to any functionality.
 
-import { Bell, LogOut, Menu, Search } from 'lucide-react';
+import { LogOut, Menu } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDemo } from '../store/DemoContext';
+
+function initials(name) {
+  return String(name || 'U')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('');
+}
 
 export default function Topbar({
   title = 'Dashboard',
@@ -17,69 +27,51 @@ export default function Topbar({
 
   const displayName = userName || user?.name || 'User';
 
-  const initials = displayName
-    .split(' ')
-    .map((word) => word[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line/80 bg-white/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 border-b border-line/70 bg-white/85 backdrop-blur-xl">
       <div className="flex h-[4.25rem] items-center gap-3 px-4 sm:px-6 lg:px-8">
         <button
           type="button"
           onClick={onMenuClick}
           aria-label="Open dashboard menu"
-          className="inline-flex items-center justify-center rounded-lg p-2 text-ink hover:bg-slate-100 md:hidden"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-ink transition hover:bg-slate-100 md:hidden"
         >
-          <Menu className="h-6 w-6" />
+          <Menu className="h-5 w-5" />
         </button>
 
         <div className="min-w-0">
-          <h1 className="truncate text-base font-bold tracking-tight text-ink sm:text-lg">{title}</h1>
-          {subtitle && <p className="hidden truncate text-xs text-ink-soft sm:block">{subtitle}</p>}
+          <h1 className="truncate font-display text-base font-bold tracking-tight text-ink sm:text-lg">
+            {title}
+          </h1>
+          {subtitle ? (
+            <p className="hidden truncate text-xs text-ink-soft sm:block">{subtitle}</p>
+          ) : null}
         </div>
 
-        <div className="ml-auto hidden items-center lg:flex">
-          <div className="relative">
-            <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="search"
-              placeholder="Search…"
-              aria-label="Search"
-              className="input-modern w-64 rounded-full py-2 pr-4 pl-9"
-            />
+        <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2.5 rounded-xl border border-line bg-white px-2 py-1.5 sm:pr-3.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-[11px] font-bold text-teal-deep ring-1 ring-teal-100">
+              {initials(displayName)}
+            </span>
+            <span className="hidden min-w-0 sm:block">
+              <span className="block max-w-[10rem] truncate text-[13px] leading-tight font-bold text-ink">
+                {displayName}
+              </span>
+              <span className="block text-[11px] leading-tight text-ink-soft">{roleLabel}</span>
+            </span>
           </div>
-        </div>
-
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="relative ml-auto rounded-full p-2 text-ink-soft hover:bg-slate-100 hover:text-ink lg:ml-3"
-        >
-          <Bell className="h-5 w-5" />
-          <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-teal-brand ring-2 ring-white" />
-        </button>
-
-        <div className="flex items-center gap-2">
-          <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-deep text-xs font-bold text-white">{initials}</span>
-          <span className="hidden min-w-0 sm:block">
-            <span className="block max-w-[10rem] truncate text-sm leading-tight font-semibold text-ink">{displayName}</span>
-            <span className="block text-xs text-ink-soft">{roleLabel}</span>
-          </span>
           <button
             type="button"
             onClick={handleLogout}
-            className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-ink hover:bg-slate-100"
+            className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-line px-3 text-xs font-semibold text-ink transition hover:border-slate-300 hover:bg-slate-50"
             aria-label="Logout"
           >
-            <LogOut className="h-3.5 w-3.5" />
+            <LogOut className="h-4 w-4" aria-hidden="true" />
             <span className="hidden sm:inline">Logout</span>
           </button>
         </div>

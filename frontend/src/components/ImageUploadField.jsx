@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, LoaderCircle, Upload, X } from 'lucide-react';
 
 import Button from './Button';
+import ConfirmDialog from './ConfirmDialog';
 
 const DEFAULT_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const DEFAULT_MAX_BYTES = 4 * 1024 * 1024;
@@ -44,6 +45,8 @@ export default function ImageUploadField({
   const inputRef = useRef(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [validationError, setValidationError] = useState('');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const isDisabled = disabled || busy;
   const previewSource =
@@ -52,8 +55,7 @@ export default function ImageUploadField({
   const messageType = validationError ? 'error' : status.type;
 
   // When the parent clears the selected file (for example after a successful
-  // upload), reset the native input and release the preview URL. Rendering
-  // already falls back to the saved image URL from PostgreSQL.
+  // upload), reset the native input and release the preview URL.
   useEffect(() => {
     if (!file) {
       if (inputRef.current) inputRef.current.value = '';
@@ -61,7 +63,6 @@ export default function ImageUploadField({
     }
   }, [file, previewUrl]);
 
-  // Revoke object URLs when the preview changes or the component unmounts.
   useEffect(
     () => () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -87,8 +88,7 @@ export default function ImageUploadField({
     }
 
     if (!allowedTypes.includes(selected.type)) {
-      const error = 'Unsupported format. Please use JPG, JPEG, PNG, or WEBP.';
-      setValidationError(error);
+      setValidationError('Unsupported format. Please use JPG, JPEG, PNG, or WEBP.');
       clearPreview();
       event.target.value = '';
       onFileChange?.(null);
@@ -96,8 +96,7 @@ export default function ImageUploadField({
     }
 
     if (selected.size > maxBytes) {
-      const error = `Image is too large. Maximum size is ${formatMb(maxBytes)}.`;
-      setValidationError(error);
+      setValidationError(`Image is too large. Maximum size is ${formatMb(maxBytes)}.`);
       clearPreview();
       event.target.value = '';
       onFileChange?.(null);
@@ -105,8 +104,7 @@ export default function ImageUploadField({
     }
 
     if (selected.size <= 0) {
-      const error = 'The selected image is empty. Please choose another file.';
-      setValidationError(error);
+      setValidationError('The selected image is empty. Please choose another file.');
       clearPreview();
       event.target.value = '';
       onFileChange?.(null);
@@ -127,11 +125,15 @@ export default function ImageUploadField({
 
   const handleRemove = async () => {
     if (!onRemove) return;
-    if (removeConfirm && !window.confirm(removeConfirm)) return;
+    setRemoving(true);
     try {
       await onRemove();
+      setConfirmOpen(false);
     } catch {
       // The parent shows the error message via the status prop.
+      setConfirmOpen(false);
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -141,18 +143,18 @@ export default function ImageUploadField({
       : 'h-40 w-full rounded-xl object-cover sm:h-48';
 
   return (
-    <div className={`rounded-xl border border-line bg-surface p-4 ${className}`}>
+    <div className={`rounded-2xl border border-line bg-surface/70 p-4 ${className}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h4 className="flex items-center gap-2 text-sm font-bold text-ink">
-            <ImagePlus className="h-4 w-4 text-teal-deep" />
+            <ImagePlus className="h-4 w-4 text-teal-deep" aria-hidden="true" />
             {label}
           </h4>
-          {description ? <p className="mt-1 text-xs text-ink-soft">{description}</p> : null}
+          {description ? <p className="mt-1 text-xs leading-relaxed text-ink-soft">{description}</p> : null}
         </div>
         {busy ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-teal-deep">
-            <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-teal-deep ring-1 ring-line">
+            <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
             Working…
           </span>
         ) : null}
@@ -172,18 +174,16 @@ export default function ImageUploadField({
             }`}
           >
             <div className="px-4">
-              <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-50 text-teal-deep">
-                <ImagePlus className="h-5 w-5" />
+              <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-teal-deep">
+                <ImagePlus className="h-5 w-5" aria-hidden="true" />
               </span>
-              <p className="mt-2 text-xs text-ink-soft">
-                {emptyText || 'No image selected yet.'}
-              </p>
+              <p className="mt-2 text-xs text-ink-soft">{emptyText || 'No image selected yet.'}</p>
             </div>
           </div>
         )}
       </div>
 
-      <label htmlFor={id} className="mt-3 mb-1.5 block text-sm font-semibold text-ink">
+      <label htmlFor={id} className="mt-4 mb-1.5 block text-sm font-semibold text-ink">
         Select image from your computer
       </label>
       <input
@@ -193,7 +193,7 @@ export default function ImageUploadField({
         accept={accept}
         onChange={handleFileChange}
         disabled={isDisabled}
-        className="block w-full rounded-xl border border-line bg-white px-3 py-2.5 text-sm text-ink file:mr-3 file:rounded-lg file:border-0 file:bg-teal-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-teal-deep hover:file:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className="block w-full cursor-pointer rounded-xl border border-line bg-white px-3 py-2.5 text-sm text-ink file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-teal-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-teal-deep hover:file:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-60"
       />
       <p className="mt-1 text-xs text-ink-soft">
         {helpText || `JPG, JPEG, PNG, or WEBP. Max ${formatMb(maxBytes)}.`}
@@ -223,6 +223,7 @@ export default function ImageUploadField({
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           type="button"
+          size="sm"
           onClick={onUpload}
           disabled={!file || isDisabled || !canUpload}
           title={canUpload ? 'Upload the selected image' : 'Save the record first, then upload an image.'}
@@ -232,14 +233,14 @@ export default function ImageUploadField({
         </Button>
 
         {file ? (
-          <Button type="button" variant="ghost" onClick={handleClear} disabled={isDisabled}>
+          <Button type="button" size="sm" variant="ghost" onClick={handleClear} disabled={isDisabled}>
             <X className="h-4 w-4" />
             {clearLabel}
           </Button>
         ) : null}
 
         {!file && currentImageUrl && onRemove ? (
-          <Button type="button" variant="secondary" onClick={handleRemove} disabled={isDisabled}>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setConfirmOpen(true)} disabled={isDisabled}>
             <X className="h-4 w-4" />
             {removeLabel}
           </Button>
@@ -263,6 +264,16 @@ export default function ImageUploadField({
           {message}
         </p>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={handleRemove}
+        title="Remove image"
+        description={removeConfirm}
+        confirmLabel="Remove image"
+        loading={removing}
+      />
     </div>
   );
 }

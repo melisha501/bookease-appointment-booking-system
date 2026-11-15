@@ -3,11 +3,23 @@
 // mark specific dates as holidays/unavailable. Changes persist in PostgreSQL.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CalendarOff, Check, Clock, LoaderCircle, Pencil, Plus, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  CalendarOff,
+  Check,
+  Clock,
+  Coffee,
+  Pencil,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react';
 
 import { api } from '../api/client';
+import Badge from '../components/Badge';
 import Button from '../components/Button';
 import Card from '../components/Card';
+import ConfirmDialog from '../components/ConfirmDialog';
+import EmptyState from '../components/EmptyState';
 import StatusBadge from '../components/StatusBadge';
 import { useDemo } from '../store/DemoContext';
 
@@ -121,7 +133,12 @@ function formatExceptionDate(dateStr) {
   if (!dateStr) return '';
   const d = new Date(`${dateStr}T00:00:00`);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 const EMPTY_EXCEPTION_FORM = { date: '', type: 'unavailable', note: '' };
@@ -149,6 +166,9 @@ export default function AdminWorkingHours() {
   const [exceptionSaving, setExceptionSaving] = useState(false);
   const [exceptionError, setExceptionError] = useState('');
   const [exceptionFieldErrors, setExceptionFieldErrors] = useState({});
+  const [scheduleDeleteOpen, setScheduleDeleteOpen] = useState(false);
+  const [exceptionDeleteTarget, setExceptionDeleteTarget] = useState(null);
+  const [exceptionDeleting, setExceptionDeleting] = useState(false);
 
   const provider = useMemo(
     () => specialistList.find((s) => s.id === providerId) || null,
@@ -225,7 +245,12 @@ export default function AdminWorkingHours() {
     if (!provider) return [];
     return (Array.isArray(appointments) ? appointments : []).filter((a) => {
       const sp = a.specialistId || a.specialist;
-      return sp === provider.id || sp === provider.slug || sp === provider.dbId || a.specialist === provider.name;
+      return (
+        sp === provider.id ||
+        sp === provider.slug ||
+        sp === provider.dbId ||
+        a.specialist === provider.name
+      );
     });
   }, [appointments, provider]);
 
@@ -278,15 +303,16 @@ export default function AdminWorkingHours() {
 
   const handleDeleteSchedule = async () => {
     if (!providerId) return;
-    if (!window.confirm('Delete the weekly working schedule for this provider? Existing date exceptions will remain until removed.')) return;
     setSaving(true);
     setError('');
     try {
       await api.del(`/specialists/${encodeURIComponent(providerId)}/working-hours`);
       setSchedule({ ...DEFAULT_SCHEDULE });
+      setScheduleDeleteOpen(false);
       flash('Weekly schedule deleted.');
       await refreshCatalog().catch(() => {});
     } catch (err) {
+      setScheduleDeleteOpen(false);
       setError(err?.message || 'Failed to delete working hours.');
     } finally {
       setSaving(false);
@@ -353,6 +379,7 @@ export default function AdminWorkingHours() {
     });
     setExceptionFieldErrors({});
     setExceptionError('');
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCancelExceptionEdit = () => {
@@ -360,19 +387,24 @@ export default function AdminWorkingHours() {
   };
 
   const handleDeleteException = async (ex) => {
-    if (!providerId) return;
-    const label = ex.date;
-    if (!window.confirm(`Remove the unavailable/holiday entry for ${label}?`)) return;
+    if (!providerId || !ex || exceptionDeleting) return;
+    setExceptionDeleting(true);
     setExceptionError('');
     try {
-      await api.del(`/specialists/${encodeURIComponent(providerId)}/date-exceptions/${encodeURIComponent(ex.id || ex.date)}`);
+      await api.del(
+        `/specialists/${encodeURIComponent(providerId)}/date-exceptions/${encodeURIComponent(ex.id || ex.date)}`
+      );
       if (editingExceptionId && (editingExceptionId === ex.id || editingExceptionId === ex.date)) {
         resetExceptionForm();
       }
+      setExceptionDeleteTarget(null);
       flash('Date exception removed.');
       await loadWorkingHours(providerId);
     } catch (err) {
+      setExceptionDeleteTarget(null);
       setExceptionError(err?.message || 'Failed to remove date exception.');
+    } finally {
+      setExceptionDeleting(false);
     }
   };
 
@@ -388,11 +420,16 @@ export default function AdminWorkingHours() {
 
   if (catalogLoading && specialistList.length === 0) {
     return (
-      <Card>
-        <p className="flex items-center gap-2 text-sm text-ink-soft">
-          <LoaderCircle className="h-4 w-4 animate-spin" /> Loading specialists…
-        </p>
-      </Card>
+      <div className="space-y-6" aria-label="Loading specialists">
+        <div className="space-y-2">
+          <div className="skeleton h-3 w-24" />
+          <div className="skeleton h-8 w-56" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-5">
+          <div className="skeleton h-96 rounded-2xl lg:col-span-3" />
+          <div className="skeleton h-72 rounded-2xl lg:col-span-2" />
+        </div>
+      </div>
     );
   }
 
@@ -400,7 +437,7 @@ export default function AdminWorkingHours() {
     return (
       <Card>
         <p role="alert" className="flex items-start gap-2 text-sm font-medium text-red-600">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {catalogError}
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> {catalogError}
         </p>
         <Button variant="secondary" size="sm" className="mt-4" onClick={() => refreshCatalog()}>
           Retry
@@ -411,18 +448,34 @@ export default function AdminWorkingHours() {
 
   if (specialistList.length === 0) {
     return (
-      <Card>
-        <p className="text-sm text-ink-soft">No specialists found. Add a specialist first, then configure working hours.</p>
-      </Card>
+      <EmptyState
+        title="No specialists yet"
+        description="Add a specialist first, then configure their weekly schedule and unavailable dates."
+        icon={Clock}
+      >
+        <Button to="/admin/providers">Manage providers</Button>
+      </EmptyState>
     );
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-5">
+    <div className="space-y-6">
+      <div>
+        <p className="eyebrow">
+          <span className="h-1.5 w-1.5 rounded-full bg-teal-brand" aria-hidden="true" />
+          Availability
+        </p>
+        <h2 className="mt-2 text-h2">Working hours</h2>
+        <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-ink-soft">
+          Set weekly opening hours, breaks, and date exceptions per provider. Booking availability
+          reads directly from this schedule.
+        </p>
+      </div>
+
       {catalogError ? (
         <div
           role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 lg:col-span-5"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900"
         >
           <span>{catalogError}</span>
           <Button variant="secondary" size="sm" onClick={() => refreshCatalog()}>
@@ -431,276 +484,499 @@ export default function AdminWorkingHours() {
         </div>
       ) : null}
 
-      <div className="space-y-6 lg:col-span-3">
-        <Card>
-          <h3 className="flex items-center gap-2 text-base font-bold text-ink">
-            <Clock className="h-5 w-5 text-teal-deep" /> Provider Schedule
-          </h3>
-
-          <div className="mt-4 max-w-md">
-            <label htmlFor="provider-select" className="mb-1.5 block text-sm font-semibold text-ink">Specialist</label>
-            <select
-              id="provider-select"
-              value={providerId}
-              onChange={(e) => { setProviderId(e.target.value); setError(''); setNotice(''); }}
-              className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
-            >
-              {specialistList.map((s) => <option key={s.id} value={s.id}>{s.name} — {s.title}</option>)}
-            </select>
-          </div>
-
-          {error && (
-            <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
-            </p>
-          )}
-          {notice && <p role="status" className="mt-4 rounded-xl bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-deep">{notice}</p>}
-
-          {loading ? (
-            <p className="mt-6 flex items-center gap-2 text-sm text-ink-soft"><LoaderCircle className="h-4 w-4 animate-spin" /> Loading working hours…</p>
-          ) : (
-            <form onSubmit={handleSaveSchedule} className="mt-6 space-y-6">
+      <div className="grid gap-6 lg:grid-cols-5">
+        <div className="space-y-6 lg:col-span-3">
+          <Card>
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-ink">Working Days (Monday–Sunday)</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {ALL_DAYS.map((day) => {
-                    const active = schedule.days.includes(day);
-                    return (
-                      <button
-                        key={day}
-                        type="button"
-                        onClick={() => toggleDay(day)}
-                        aria-pressed={active}
-                        title={DAY_LABELS[day]}
-                        className={`rounded-full px-4 py-2 text-sm font-semibold ${active ? 'bg-teal-deep text-white' : 'border border-line bg-white text-ink-soft hover:bg-slate-100'}`}
-                      >
-                        {day}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="mt-2 text-xs text-ink-soft">Unchecked days are non-working days. Specific dates can be marked unavailable/holiday below.</p>
-                {fieldErrors.days && <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.days}</p>}
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="wh-start" className="mb-1.5 block text-sm font-semibold text-ink">Daily Opening Time</label>
-                  <select
-                    id="wh-start"
-                    value={schedule.start}
-                    onChange={(e) => updateSchedule('start', e.target.value)}
-                    aria-invalid={Boolean(fieldErrors.start)}
-                    aria-describedby={fieldErrors.start ? 'wh-start-error' : undefined}
-                    className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
-                  >
-                    {timeOptions.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
-                  </select>
-                  {fieldErrors.start && <p id="wh-start-error" className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.start}</p>}
-                </div>
-                <div>
-                  <label htmlFor="wh-end" className="mb-1.5 block text-sm font-semibold text-ink">Daily Closing Time</label>
-                  <select
-                    id="wh-end"
-                    value={schedule.end}
-                    onChange={(e) => updateSchedule('end', e.target.value)}
-                    aria-invalid={Boolean(fieldErrors.end)}
-                    aria-describedby={fieldErrors.end ? 'wh-end-error' : undefined}
-                    className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
-                  >
-                    {timeOptions.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
-                  </select>
-                  {fieldErrors.end && <p id="wh-end-error" className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.end}</p>}
-                </div>
-                <div>
-                  <label htmlFor="wh-break-start" className="mb-1.5 block text-sm font-semibold text-ink">Break Start</label>
-                  <select
-                    id="wh-break-start"
-                    value={schedule.breakStart}
-                    onChange={(e) => updateSchedule('breakStart', e.target.value)}
-                    aria-invalid={Boolean(fieldErrors.breakStart)}
-                    aria-describedby={fieldErrors.breakStart ? 'wh-break-start-error' : undefined}
-                    className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
-                  >
-                    <option value="">No break</option>
-                    {timeOptions.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
-                  </select>
-                  {fieldErrors.breakStart && <p id="wh-break-start-error" className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.breakStart}</p>}
-                </div>
-                <div>
-                  <label htmlFor="wh-break-end" className="mb-1.5 block text-sm font-semibold text-ink">Break End</label>
-                  <select
-                    id="wh-break-end"
-                    value={schedule.breakEnd}
-                    onChange={(e) => updateSchedule('breakEnd', e.target.value)}
-                    aria-invalid={Boolean(fieldErrors.breakEnd)}
-                    aria-describedby={fieldErrors.breakEnd ? 'wh-break-end-error' : undefined}
-                    className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
-                  >
-                    <option value="">No break</option>
-                    {timeOptions.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
-                  </select>
-                  {fieldErrors.breakEnd && <p id="wh-break-end-error" className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.breakEnd}</p>}
-                </div>
-              </div>
-
-              <Card padding="p-4" className="bg-surface">
-                <p className="text-sm font-bold text-ink">Schedule Summary</p>
-                <p className="mt-1 text-xs text-ink-soft">
-                  Working: {schedule.days.length ? schedule.days.join(', ') : 'None'} · {schedule.start}–{schedule.end}
-                  {schedule.breakStart && schedule.breakEnd ? ` · Break ${schedule.breakStart}–${schedule.breakEnd}` : ' · No break'}
+                <h3 className="flex items-center gap-2 text-base font-bold text-ink">
+                  <Clock className="h-5 w-5 text-teal-deep" aria-hidden="true" />
+                  Weekly schedule
+                </h3>
+                <p className="mt-1 text-sm text-ink-soft">
+                  Choose the provider, then adjust their standard week.
                 </p>
-                <p className="mt-1 text-xs text-ink-soft">Booking availability uses this schedule and date exceptions. Slots outside hours/breaks or on unavailable dates are blocked.</p>
-              </Card>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" disabled={saving}>
-                  {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  {saving ? 'Saving…' : 'Save Schedule'}
-                </Button>
-                <Button type="button" variant="secondary" onClick={handleDeleteSchedule} disabled={saving}>Delete Weekly Schedule</Button>
               </div>
-            </form>
-          )}
-        </Card>
-
-        <Card>
-          <h3 className="flex items-center gap-2 text-base font-bold text-ink">
-            <CalendarOff className="h-5 w-5 text-teal-deep" /> Unavailable Dates &amp; Holidays
-          </h3>
-          <p className="mt-1 text-xs text-ink-soft">Mark specific calendar dates as unavailable or holidays. Bookings are prevented on these dates.</p>
-
-          {exceptionError && (
-            <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {exceptionError}
-            </p>
-          )}
-
-          <form onSubmit={handleExceptionSubmit} className="mt-4 grid gap-3 rounded-2xl border border-line bg-surface p-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="ex-date" className="mb-1.5 block text-sm font-semibold text-ink">Date</label>
-              <input
-                id="ex-date"
-                type="date"
-                value={exceptionForm.date}
-                onChange={(e) => {
-                  setExceptionForm((f) => ({ ...f, date: e.target.value }));
-                  setExceptionFieldErrors((prev) => ({ ...prev, date: '' }));
-                }}
-                aria-invalid={Boolean(exceptionFieldErrors.date)}
-                aria-describedby={exceptionFieldErrors.date ? 'ex-date-error' : undefined}
-                className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
-              />
-              {exceptionFieldErrors.date && <p id="ex-date-error" className="mt-1 text-xs font-semibold text-red-600">{exceptionFieldErrors.date}</p>}
+              {provider ? (
+                <Badge variant={loading ? 'muted' : 'default'}>
+                  {provider.name} · {provider.title}
+                </Badge>
+              ) : null}
             </div>
-            <div>
-              <label htmlFor="ex-type" className="mb-1.5 block text-sm font-semibold text-ink">Type</label>
+
+            <div className="mt-5 max-w-md">
+              <label htmlFor="provider-select" className="field-label">
+                Specialist
+              </label>
               <select
-                id="ex-type"
-                value={exceptionForm.type}
-                onChange={(e) => setExceptionForm((f) => ({ ...f, type: e.target.value }))}
-                className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
+                id="provider-select"
+                value={providerId}
+                onChange={(e) => {
+                  setProviderId(e.target.value);
+                  setError('');
+                  setNotice('');
+                }}
+                className="field"
               >
-                <option value="unavailable">Unavailable</option>
-                <option value="holiday">Holiday</option>
+                {specialistList.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} — {s.title}
+                  </option>
+                ))}
               </select>
             </div>
-            <div className="sm:col-span-2">
-              <label htmlFor="ex-note" className="mb-1.5 block text-sm font-semibold text-ink">Note <span className="font-normal text-ink-soft">(optional)</span></label>
-              <input
-                id="ex-note"
-                type="text"
-                maxLength={200}
-                value={exceptionForm.note}
-                onChange={(e) => setExceptionForm((f) => ({ ...f, note: e.target.value }))}
-                placeholder="e.g. Public holiday, personal leave"
-                className="w-full rounded-xl border border-line bg-white px-4 py-2.5 text-sm outline-none focus:border-teal-brand focus:ring-2 focus:ring-teal-100"
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
-              <Button type="submit" disabled={exceptionSaving || !exceptionForm.date}>
-                {exceptionSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : editingExceptionId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                {exceptionSaving ? 'Saving…' : editingExceptionId ? 'Update Date Exception' : 'Add Date Exception'}
-              </Button>
-              {editingExceptionId && (
-                <Button type="button" variant="secondary" onClick={handleCancelExceptionEdit} disabled={exceptionSaving}>
-                  Cancel Edit
-                </Button>
-              )}
-            </div>
-            {editingExceptionId && (
-              <p className="text-xs font-semibold text-teal-deep sm:col-span-2">Editing an existing date exception.</p>
-            )}
-          </form>
 
-          <div className="mt-4 space-y-2">
-            {dateExceptions.length === 0 ? (
-              <p className="text-sm text-ink-soft">No unavailable dates or holidays configured.</p>
+            {error && (
+              <p
+                role="alert"
+                className="mt-4 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> {error}
+              </p>
+            )}
+            {notice && (
+              <p
+                role="status"
+                className="mt-4 rounded-xl border border-teal-100 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-deep"
+              >
+                {notice}
+              </p>
+            )}
+
+            {loading ? (
+              <div className="mt-6 space-y-4" aria-label="Loading working hours">
+                <div className="skeleton h-10 w-full rounded-xl" />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {[0, 1, 2, 3].map((item) => (
+                    <div key={item} className="skeleton h-11 rounded-xl" />
+                  ))}
+                </div>
+                <div className="skeleton h-24 rounded-xl" />
+              </div>
             ) : (
-              dateExceptions.map((ex) => (
-                <div key={ex.id || ex.date} className="flex items-start justify-between gap-3 rounded-2xl border border-line p-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-ink">{formatExceptionDate(ex.date)} <span className="font-semibold text-ink-soft">({ex.date})</span></p>
-                    <p className="break-words text-xs text-ink-soft capitalize">{ex.type}{ex.note ? ` · ${ex.note}` : ''}</p>
+              <form onSubmit={handleSaveSchedule} className="mt-6 space-y-6">
+                <div>
+                  <p className="text-sm font-semibold text-ink">Working days</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {ALL_DAYS.map((day) => {
+                      const active = schedule.days.includes(day);
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => toggleDay(day)}
+                          aria-pressed={active}
+                          title={DAY_LABELS[day]}
+                          className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                            active
+                              ? 'bg-teal-deep text-white shadow-[0_10px_22px_-14px_rgba(15,118,110,0.8)]'
+                              : 'border border-line bg-white text-ink-soft hover:border-slate-300 hover:bg-slate-50 hover:text-ink'
+                          }`}
+                        >
+                          {day}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleEditException(ex)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-bold text-ink hover:bg-slate-100"
-                      aria-label={`Edit exception for ${ex.date}`}
+                  <p className="mt-2 text-xs leading-relaxed text-ink-soft">
+                    Unchecked days are non-working days. Specific dates can be marked unavailable
+                    or as holidays below.
+                  </p>
+                  {fieldErrors.days && (
+                    <p className="mt-1 text-xs font-semibold text-red-600">{fieldErrors.days}</p>
+                  )}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="wh-start" className="field-label">
+                      Opening time
+                    </label>
+                    <select
+                      id="wh-start"
+                      value={schedule.start}
+                      onChange={(e) => updateSchedule('start', e.target.value)}
+                      aria-invalid={Boolean(fieldErrors.start)}
+                      aria-describedby={fieldErrors.start ? 'wh-start-error' : undefined}
+                      className="field"
                     >
-                      <Pencil className="h-3.5 w-3.5" /> Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteException(ex)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50"
-                      aria-label={`Remove exception for ${ex.date}`}
+                      {timeOptions.map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot}
+                        </option>
+                      ))}
+                    </select>
+                    {fieldErrors.start && (
+                      <p id="wh-start-error" className="field-error">
+                        {fieldErrors.start}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label htmlFor="wh-end" className="field-label">
+                      Closing time
+                    </label>
+                    <select
+                      id="wh-end"
+                      value={schedule.end}
+                      onChange={(e) => updateSchedule('end', e.target.value)}
+                      aria-invalid={Boolean(fieldErrors.end)}
+                      aria-describedby={fieldErrors.end ? 'wh-end-error' : undefined}
+                      className="field"
                     >
-                      <Trash2 className="h-3.5 w-3.5" /> Remove
-                    </button>
+                      {timeOptions.map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot}
+                        </option>
+                      ))}
+                    </select>
+                    {fieldErrors.end && (
+                      <p id="wh-end-error" className="field-error">
+                        {fieldErrors.end}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label htmlFor="wh-break-start" className="field-label">
+                      Break start
+                    </label>
+                    <select
+                      id="wh-break-start"
+                      value={schedule.breakStart}
+                      onChange={(e) => updateSchedule('breakStart', e.target.value)}
+                      aria-invalid={Boolean(fieldErrors.breakStart)}
+                      aria-describedby={fieldErrors.breakStart ? 'wh-break-start-error' : undefined}
+                      className="field"
+                    >
+                      <option value="">No break</option>
+                      {timeOptions.map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot}
+                        </option>
+                      ))}
+                    </select>
+                    {fieldErrors.breakStart && (
+                      <p id="wh-break-start-error" className="field-error">
+                        {fieldErrors.breakStart}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label htmlFor="wh-break-end" className="field-label">
+                      Break end
+                    </label>
+                    <select
+                      id="wh-break-end"
+                      value={schedule.breakEnd}
+                      onChange={(e) => updateSchedule('breakEnd', e.target.value)}
+                      aria-invalid={Boolean(fieldErrors.breakEnd)}
+                      aria-describedby={fieldErrors.breakEnd ? 'wh-break-end-error' : undefined}
+                      className="field"
+                    >
+                      <option value="">No break</option>
+                      {timeOptions.map((slot) => (
+                        <option key={slot} value={slot}>
+                          {slot}
+                        </option>
+                      ))}
+                    </select>
+                    {fieldErrors.breakEnd && (
+                      <p id="wh-break-end-error" className="field-error">
+                        {fieldErrors.breakEnd}
+                      </p>
+                    )}
                   </div>
                 </div>
-              ))
+
+                <div className="rounded-xl border border-teal-100/80 bg-teal-50/60 p-4">
+                  <p className="flex items-center gap-2 text-sm font-bold text-teal-deep">
+                    <Check className="h-4 w-4" aria-hidden="true" />
+                    Schedule summary
+                  </p>
+                  <div className="mt-2 grid gap-1.5 text-xs leading-relaxed text-ink-soft">
+                    <p>
+                      <span className="font-semibold text-ink">Working:</span>{' '}
+                      {schedule.days.length ? schedule.days.join(', ') : 'None'}
+                    </p>
+                    <p>
+                      <span className="font-semibold text-ink">Hours:</span> {schedule.start} –{' '}
+                      {schedule.end}
+                    </p>
+                    <p className="flex items-center gap-1.5">
+                      <Coffee className="h-3.5 w-3.5 text-teal-deep" aria-hidden="true" />
+                      {schedule.breakStart && schedule.breakEnd
+                        ? `Break ${schedule.breakStart} – ${schedule.breakEnd}`
+                        : 'No break configured'}
+                    </p>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-ink-soft">
+                    Slots outside these hours, during breaks, or on unavailable dates are blocked
+                    in booking.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 border-t border-line pt-5">
+                  <Button type="submit" loading={saving} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save schedule'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => setScheduleDeleteOpen(true)}
+                    disabled={saving}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Delete weekly schedule
+                  </Button>
+                </div>
+              </form>
+            )}
+          </Card>
+
+          <Card>
+            <h3 className="flex items-center gap-2 text-base font-bold text-ink">
+              <CalendarOff className="h-5 w-5 text-teal-deep" aria-hidden="true" />
+              Unavailable dates &amp; holidays
+            </h3>
+            <p className="mt-1 text-sm text-ink-soft">
+              Block specific calendar dates. Bookings are prevented on these dates.
+            </p>
+
+            {exceptionError && (
+              <p
+                role="alert"
+                className="mt-4 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> {exceptionError}
+              </p>
+            )}
+
+            <form
+              onSubmit={handleExceptionSubmit}
+              className="mt-4 grid gap-3 rounded-xl border border-line bg-surface/70 p-4 sm:grid-cols-2"
+            >
+              <div>
+                <label htmlFor="ex-date" className="field-label">
+                  Date
+                </label>
+                <input
+                  id="ex-date"
+                  type="date"
+                  value={exceptionForm.date}
+                  onChange={(e) => {
+                    setExceptionForm((f) => ({ ...f, date: e.target.value }));
+                    setExceptionFieldErrors((prev) => ({ ...prev, date: '' }));
+                  }}
+                  aria-invalid={Boolean(exceptionFieldErrors.date)}
+                  aria-describedby={exceptionFieldErrors.date ? 'ex-date-error' : undefined}
+                  className="field"
+                />
+                {exceptionFieldErrors.date && (
+                  <p id="ex-date-error" className="field-error">
+                    {exceptionFieldErrors.date}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label htmlFor="ex-type" className="field-label">
+                  Type
+                </label>
+                <select
+                  id="ex-type"
+                  value={exceptionForm.type}
+                  onChange={(e) => setExceptionForm((f) => ({ ...f, type: e.target.value }))}
+                  className="field"
+                >
+                  <option value="unavailable">Unavailable</option>
+                  <option value="holiday">Holiday</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="ex-note" className="field-label">
+                  Note <span className="font-normal text-ink-soft">(optional)</span>
+                </label>
+                <input
+                  id="ex-note"
+                  type="text"
+                  maxLength={200}
+                  value={exceptionForm.note}
+                  onChange={(e) => setExceptionForm((f) => ({ ...f, note: e.target.value }))}
+                  placeholder="e.g. Public holiday, personal leave"
+                  className="field"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+                <Button
+                  type="submit"
+                  loading={exceptionSaving}
+                  disabled={exceptionSaving || !exceptionForm.date}
+                >
+                  {exceptionSaving
+                    ? 'Saving…'
+                    : editingExceptionId
+                      ? 'Update date exception'
+                      : 'Add date exception'}
+                </Button>
+                {editingExceptionId && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleCancelExceptionEdit}
+                    disabled={exceptionSaving}
+                  >
+                    Cancel edit
+                  </Button>
+                )}
+              </div>
+              {editingExceptionId && (
+                <p className="text-xs font-semibold text-teal-deep sm:col-span-2">
+                  Editing an existing date exception.
+                </p>
+              )}
+            </form>
+
+            <div className="mt-4 space-y-2">
+              {dateExceptions.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-line bg-surface/50 px-4 py-8 text-center">
+                  <p className="text-sm font-semibold text-ink">No exceptions configured</p>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    Add holidays or unavailable dates above when needed.
+                  </p>
+                </div>
+              ) : (
+                dateExceptions.map((ex) => (
+                  <div
+                    key={ex.id || ex.date}
+                    className="flex flex-col gap-3 rounded-xl border border-line bg-white p-3.5 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-bold text-ink">
+                          {formatExceptionDate(ex.date)}
+                        </p>
+                        <Badge variant={ex.type === 'holiday' ? 'warning' : 'muted'}>
+                          {ex.type === 'holiday' ? 'Holiday' : 'Unavailable'}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 font-mono text-[11px] text-ink-soft">{ex.date}</p>
+                      {ex.note ? (
+                        <p className="mt-1 text-xs break-words text-ink-soft">{ex.note}</p>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleEditException(ex)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-bold text-ink transition hover:border-slate-300 hover:bg-slate-50"
+                        aria-label={`Edit exception for ${ex.date}`}
+                      >
+                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExceptionDeleteTarget(ex)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-xs font-bold text-red-600 transition hover:border-red-200 hover:bg-red-50"
+                        aria-label={`Remove exception for ${ex.date}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Remove
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
+
+        <Card className="h-fit lg:col-span-2">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-ink">Assigned appointments</h3>
+              <p className="mt-0.5 text-xs text-ink-soft">
+                {provider ? provider.name : 'Provider'} · {assigned.length} booking
+                {assigned.length === 1 ? '' : 's'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadAppointments()}
+              disabled={appointmentsLoading}
+              aria-label="Refresh assigned appointments"
+              className="rounded-lg border border-line p-2 text-ink-soft transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${appointmentsLoading ? 'animate-spin' : ''}`}
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {appointmentsLoading ? (
+              <div className="space-y-3">
+                {[0, 1, 2].map((item) => (
+                  <div key={item} className="skeleton h-20 rounded-xl" />
+                ))}
+              </div>
+            ) : assigned.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-line bg-surface/50 px-4 py-8 text-center">
+                <Clock className="mx-auto h-6 w-6 text-teal-deep/60" aria-hidden="true" />
+                <p className="mt-2 text-sm font-semibold text-ink">No assigned appointments</p>
+                <p className="mt-1 text-xs text-ink-soft">
+                  Bookings for this provider will appear here.
+                </p>
+              </div>
+            ) : (
+              assigned.map((a) => {
+                const ref = a.reference || a.id;
+                return (
+                  <div key={ref} className="rounded-xl border border-line bg-white p-3.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-ink">{a.service}</p>
+                        <p className="mt-0.5 text-xs break-words text-ink-soft">
+                          {a.customer || a.customerName} · {a.date} {a.time}
+                        </p>
+                        <p className="mt-0.5 font-mono text-[10px] text-slate-400">{ref}</p>
+                      </div>
+                      <span className="shrink-0">
+                        <StatusBadge status={a.status} />
+                      </span>
+                    </div>
+                    {a.status === 'confirmed' && (
+                      <Button size="sm" className="mt-3" onClick={() => handleComplete(ref)}>
+                        <Check className="h-4 w-4" aria-hidden="true" /> Mark completed
+                      </Button>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </Card>
       </div>
 
-      <Card className="lg:col-span-2">
-        <h3 className="text-base font-bold text-ink">Assigned Appointments</h3>
-        <p className="text-xs text-ink-soft">{provider ? provider.name : ''} · {assigned.length} bookings</p>
-        <div className="mt-4 space-y-3">
-          {appointmentsLoading ? (
-            <p className="text-sm text-ink-soft">Loading appointments…</p>
-          ) : assigned.length === 0 ? (
-            <p className="text-sm text-ink-soft">No assigned appointments for this provider.</p>
-          ) : (
-            assigned.map((a) => {
-              const ref = a.reference || a.id;
-              return (
-                <div key={ref} className="rounded-2xl border border-line p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-ink">{a.service}</p>
-                      <p className="break-words text-xs text-ink-soft">{a.customer || a.customerName} · {a.date} {a.time} · {ref}</p>
-                    </div>
-                    <span className="shrink-0">
-                      <StatusBadge status={a.status} />
-                    </span>
-                  </div>
-                  {a.status === 'confirmed' && (
-                    <Button size="sm" className="mt-3" onClick={() => handleComplete(ref)}>
-                      <Check className="h-4 w-4" /> Mark Completed
-                    </Button>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </Card>
+      <ConfirmDialog
+        open={scheduleDeleteOpen}
+        onClose={() => setScheduleDeleteOpen(false)}
+        onConfirm={handleDeleteSchedule}
+        title="Delete weekly schedule"
+        description="Delete the weekly working schedule for this provider? Existing date exceptions will remain until removed."
+        confirmLabel="Delete schedule"
+        loading={saving}
+      />
+
+      <ConfirmDialog
+        open={Boolean(exceptionDeleteTarget)}
+        onClose={() => setExceptionDeleteTarget(null)}
+        onConfirm={async () => {
+          await handleDeleteException(exceptionDeleteTarget);
+        }}
+        title="Remove date exception"
+        description={`Remove the unavailable/holiday entry for ${exceptionDeleteTarget?.date || ''}?`}
+        confirmLabel="Remove exception"
+        loading={exceptionDeleting}
+      />
     </div>
   );
 }

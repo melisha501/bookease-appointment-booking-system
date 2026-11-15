@@ -5,16 +5,20 @@
 // visible/focused again so counts stay in sync with appointments, customers,
 // services, and providers.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity,
+  ArrowRight,
   BarChart3,
   CalendarDays,
+  CalendarPlus,
+  CheckCircle2,
   Clock,
   Layers,
   RefreshCw,
   Scissors,
+  Sparkles,
   UserCheck,
   Users,
 } from 'lucide-react';
@@ -24,6 +28,7 @@ import Button from '../components/Button';
 import Card from '../components/Card';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
+import { useDemo } from '../store/DemoContext';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -40,31 +45,11 @@ const EMPTY_STATS = {
 };
 
 const STATUS_STYLES = {
-  pending: {
-    dot: 'bg-amber-500',
-    bar: 'bg-amber-500',
-    border: 'border-amber-200',
-  },
-  confirmed: {
-    dot: 'bg-emerald-500',
-    bar: 'bg-emerald-500',
-    border: 'border-emerald-200',
-  },
-  completed: {
-    dot: 'bg-teal-brand',
-    bar: 'bg-teal-brand',
-    border: 'border-teal-200',
-  },
-  cancelled: {
-    dot: 'bg-slate-400',
-    bar: 'bg-slate-400',
-    border: 'border-slate-200',
-  },
-  rejected: {
-    dot: 'bg-rose-500',
-    bar: 'bg-rose-500',
-    border: 'border-rose-200',
-  },
+  pending: { dot: 'bg-amber-500', bar: 'bg-amber-500', border: 'border-amber-200' },
+  confirmed: { dot: 'bg-emerald-500', bar: 'bg-emerald-500', border: 'border-emerald-200' },
+  completed: { dot: 'bg-teal-brand', bar: 'bg-teal-brand', border: 'border-teal-200' },
+  cancelled: { dot: 'bg-slate-400', bar: 'bg-slate-400', border: 'border-slate-200' },
+  rejected: { dot: 'bg-rose-500', bar: 'bg-rose-500', border: 'border-rose-200' },
 };
 
 const FALLBACK_STATUS_STYLE = STATUS_STYLES.pending;
@@ -94,12 +79,13 @@ function formatUpdated(value) {
   });
 }
 
-function EmptyBlock({ icon: Icon, title, description }) {
+function EmptyBlock({ icon: Icon, title, description, action }) {
   return (
     <div className="mt-6 rounded-2xl border border-dashed border-line bg-surface/60 px-4 py-10 text-center">
-      {Icon && <Icon className="mx-auto h-8 w-8 text-teal-deep/70" />}
+      {Icon && <Icon className="mx-auto h-8 w-8 text-teal-deep/70" aria-hidden="true" />}
       <p className="mt-3 text-sm font-bold text-ink">{title}</p>
       <p className="mx-auto mt-1 max-w-sm text-xs leading-relaxed text-ink-soft">{description}</p>
+      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
     </div>
   );
 }
@@ -107,13 +93,15 @@ function EmptyBlock({ icon: Icon, title, description }) {
 function StatusTile({ item }) {
   const style = statusStyle(item.status);
   return (
-    <div className={`rounded-2xl border bg-white p-4 shadow-sm ${style.border}`}>
+    <div
+      className={`rounded-xl border bg-white p-4 shadow-soft transition duration-200 hover:-translate-y-0.5 hover:shadow-card ${style.border}`}
+    >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-ink-soft">{item.label}</p>
+        <p className="text-xs font-semibold text-ink-soft">{item.label}</p>
         <span className={`h-2.5 w-2.5 rounded-full ${style.dot}`} aria-hidden="true" />
       </div>
-      <p className="mt-1 text-2xl font-bold tracking-tight text-ink">{item.count}</p>
-      <p className="text-xs text-ink-soft">{item.percentage}% of appointments</p>
+      <p className="mt-1 font-display text-2xl font-bold tracking-tight text-ink">{item.count}</p>
+      <p className="text-[11px] text-ink-soft">{item.percentage}% of appointments</p>
     </div>
   );
 }
@@ -207,23 +195,27 @@ function DashboardSkeleton() {
       <span className="sr-only">Loading dashboard statistics…</span>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[0, 1, 2, 3].map((item) => (
-          <div key={item} className="h-28 animate-pulse rounded-2xl border border-line bg-white" />
+          <div key={item} className="h-28 rounded-2xl border border-line bg-white p-5">
+            <div className="skeleton h-3 w-24" />
+            <div className="skeleton mt-3 h-7 w-16" />
+          </div>
         ))}
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {[0, 1, 2, 3, 4].map((item) => (
-          <div key={item} className="h-24 animate-pulse rounded-2xl border border-line bg-white" />
+          <div key={item} className="skeleton h-24 rounded-xl" />
         ))}
       </div>
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="h-72 animate-pulse rounded-2xl border border-line bg-white" />
-        <div className="h-72 animate-pulse rounded-2xl border border-line bg-white" />
+        <div className="skeleton h-72 rounded-2xl" />
+        <div className="skeleton h-72 rounded-2xl" />
       </div>
     </div>
   );
 }
 
 export default function AdminOverview() {
+  const { user } = useDemo();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -266,34 +258,14 @@ export default function AdminOverview() {
     [fetchStats]
   );
 
+  // Initial load and teardown guard.
   useEffect(() => {
     mountedRef.current = true;
+    load();
     return () => {
       mountedRef.current = false;
     };
-  }, []);
-
-  useEffect(() => {
-    async function loadInitialStats() {
-      if (inFlightRef.current) return;
-      inFlightRef.current = true;
-      try {
-        const payload = await api.get('/dashboard/stats');
-        if (!mountedRef.current) return;
-        setData(payload);
-        setLastUpdated(new Date());
-        setError('');
-      } catch (err) {
-        if (!mountedRef.current) return;
-        setError(err?.message || 'Failed to load dashboard statistics.');
-      } finally {
-        inFlightRef.current = false;
-        if (mountedRef.current) setLoading(false);
-      }
-    }
-
-    loadInitialStats();
-  }, []);
+  }, [load]);
 
   // Keep statistics fresh while the dashboard is open.
   useEffect(() => {
@@ -318,38 +290,107 @@ export default function AdminOverview() {
   const bookingActivity = Array.isArray(data?.bookingActivity) ? data.bookingActivity : [];
   const recentAppointments = Array.isArray(data?.recentAppointments) ? data.recentAppointments : [];
   const activeAppointments = stats.pendingAppointments + stats.confirmedAppointments;
+  const firstName = String(user?.name || 'Admin').split(' ')[0];
+
+  const attention = useMemo(() => {
+    const items = [];
+    if (stats.pendingAppointments > 0) {
+      items.push(
+        `${stats.pendingAppointments} pending request${stats.pendingAppointments === 1 ? '' : 's'}`
+      );
+    }
+    if (stats.totalProviders === 0) items.push('no providers configured');
+    if (stats.totalServices === 0) items.push('no services in the catalog');
+    return items;
+  }, [stats.pendingAppointments, stats.totalProviders, stats.totalServices]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-teal-deep px-6 py-6 text-white sm:px-8">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight">Admin Overview</h2>
-          <p className="mt-1 text-sm text-teal-100">Live statistics from your PostgreSQL database.</p>
-          <p className="mt-2 text-xs text-teal-200">
-            {lastUpdated
-              ? `Updated ${formatUpdated(lastUpdated)} · refreshes automatically every 30 seconds`
-              : 'Connecting to the database…'}
-          </p>
+      {/* Hero */}
+      <section className="relative overflow-hidden rounded-2xl bg-teal-deep px-6 py-7 text-white shadow-card sm:px-8 sm:py-8">
+        <div
+          className="pointer-events-none absolute inset-0 opacity-80"
+          style={{
+            backgroundImage:
+              'radial-gradient(520px 240px at 92% 0%, rgba(45,212,191,0.24), transparent 62%), radial-gradient(420px 220px at 8% 100%, rgba(255,255,255,0.08), transparent 60%)',
+          }}
+          aria-hidden="true"
+        />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-[11px] font-bold tracking-[0.16em] text-teal-100 uppercase">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Business overview
+            </p>
+            <h2 className="mt-2 text-balance text-2xl font-extrabold tracking-tight sm:text-3xl">
+              Welcome back, {firstName}
+            </h2>
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-teal-50/85">
+              {attention.length > 0
+                ? `Needs attention: ${attention.join(' · ')}.`
+                : 'Everything looks caught up. Your catalog and appointment queue are in good shape.'}
+            </p>
+            <p className="mt-3 text-xs text-teal-100/80">
+              {lastUpdated
+                ? `Updated ${formatUpdated(lastUpdated)} · refreshes automatically every 30 seconds`
+                : 'Connecting to the database…'}
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2.5">
+              <Button to="/admin/appointments" variant="light" size="sm">
+                <CalendarDays className="h-4 w-4" aria-hidden="true" />
+                Manage appointments
+              </Button>
+              <Button to="/admin/services" variant="onDark" size="sm">
+                <Scissors className="h-4 w-4" aria-hidden="true" />
+                Manage services
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid shrink-0 grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-1">
+            <div className="rounded-xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur">
+              <p className="text-[10px] font-bold tracking-[0.14em] text-teal-100 uppercase">
+                Pending
+              </p>
+              <p className="mt-0.5 text-2xl font-bold">{loading ? '—' : stats.pendingAppointments}</p>
+            </div>
+            <div className="rounded-xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur">
+              <p className="text-[10px] font-bold tracking-[0.14em] text-teal-100 uppercase">
+                Confirmed
+              </p>
+              <p className="mt-0.5 text-2xl font-bold">{loading ? '—' : stats.confirmedAppointments}</p>
+            </div>
+            <div className="rounded-xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur">
+              <p className="text-[10px] font-bold tracking-[0.14em] text-teal-100 uppercase">
+                Active bookings
+              </p>
+              <p className="mt-0.5 text-2xl font-bold">{loading ? '—' : activeAppointments}</p>
+            </div>
+            <Button
+              variant="onDark"
+              size="sm"
+              onClick={() => load()}
+              disabled={loading || refreshing}
+              className="w-full"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${loading || refreshing ? 'animate-spin' : ''}`}
+                aria-hidden="true"
+              />
+              {refreshing ? 'Refreshing…' : 'Refresh data'}
+            </Button>
+          </div>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => load()}
-          disabled={loading || refreshing}
-        >
-          <RefreshCw className={`h-4 w-4 ${loading || refreshing ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-      </div>
+      </section>
 
       {error && (
         <div
           role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-600"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
         >
           <span>{error}</span>
           <Button variant="secondary" size="sm" onClick={() => load()} disabled={loading || refreshing}>
-            Retry
+            Try again
           </Button>
         </div>
       )}
@@ -360,25 +401,25 @@ export default function AdminOverview() {
         <>
           <section aria-label="Key statistics" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
-              title="Total Customers"
+              title="Total customers"
               value={stats.totalCustomers}
               subtitle="Registered customer accounts"
               icon={Users}
             />
             <StatCard
-              title="Total Providers"
+              title="Total providers"
               value={stats.totalProviders}
               subtitle="Service specialists"
               icon={UserCheck}
             />
             <StatCard
-              title="Total Services"
+              title="Total services"
               value={stats.totalServices}
               subtitle="Services in the catalog"
               icon={Scissors}
             />
             <StatCard
-              title="Total Appointments"
+              title="Total appointments"
               value={stats.totalAppointments}
               subtitle="All bookings on record"
               icon={CalendarDays}
@@ -386,17 +427,30 @@ export default function AdminOverview() {
             />
           </section>
 
-          <section aria-label="Appointment status counts" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {statusBreakdown.map((item) => (
-              <StatusTile key={item.status} item={item} />
-            ))}
+          <section aria-label="Appointment status counts">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-base font-bold text-ink">Appointment status</h3>
+              <Link
+                to="/admin/appointments"
+                className="inline-flex items-center gap-1 text-sm font-semibold text-teal-deep hover:underline"
+              >
+                View all
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {statusBreakdown.map((item) => (
+                <StatusTile key={item.status} item={item} />
+              ))}
+            </div>
           </section>
 
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="flex items-center gap-2 text-base font-bold text-ink">
-                  <BarChart3 className="h-5 w-5 text-teal-deep" /> Appointment Statuses
+                  <BarChart3 className="h-5 w-5 text-teal-deep" aria-hidden="true" />
+                  Status breakdown
                 </h3>
                 <span className="text-xs font-semibold text-ink-soft">
                   {stats.totalAppointments} total
@@ -408,7 +462,8 @@ export default function AdminOverview() {
             <Card>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="flex items-center gap-2 text-base font-bold text-ink">
-                  <Activity className="h-5 w-5 text-teal-deep" /> Booking Activity
+                  <Activity className="h-5 w-5 text-teal-deep" aria-hidden="true" />
+                  Booking activity
                 </h3>
                 <span className="text-xs font-semibold text-ink-soft">Last 7 days</span>
               </div>
@@ -416,10 +471,10 @@ export default function AdminOverview() {
             </Card>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="min-w-0 lg:col-span-2">
+          <div className="grid gap-6 xl:grid-cols-3">
+            <Card className="min-w-0 xl:col-span-2">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-bold text-ink">Recent Appointments</h3>
+                <h3 className="text-base font-bold text-ink">Recent appointments</h3>
                 <Link
                   to="/admin/appointments"
                   className="text-sm font-semibold whitespace-nowrap text-teal-deep hover:underline"
@@ -433,16 +488,17 @@ export default function AdminOverview() {
                   icon={CalendarDays}
                   title="No appointments yet"
                   description="New bookings will appear here with the customer, service, provider, date, and status."
+                  action={<Button to="/booking" size="sm">Open booking flow</Button>}
                 />
               ) : (
-                <div className="mt-4 overflow-x-auto">
+                <div className="mt-4 overflow-x-auto overscroll-x-contain">
                   <table className="w-full min-w-[720px] text-left text-sm">
                     <thead>
-                      <tr className="border-b border-line text-xs font-bold tracking-wider text-ink-soft uppercase">
+                      <tr className="border-b border-line text-[11px] font-bold tracking-[0.08em] text-ink-soft uppercase">
                         <th className="pb-3 pr-4">Service / Reference</th>
                         <th className="pb-3 pr-4">Customer</th>
                         <th className="pb-3 pr-4">Provider</th>
-                        <th className="pb-3 pr-4">Date &amp; Time</th>
+                        <th className="pb-3 pr-4">Schedule</th>
                         <th className="pb-3 text-right">Status</th>
                       </tr>
                     </thead>
@@ -452,11 +508,11 @@ export default function AdminOverview() {
                         return (
                           <tr
                             key={reference}
-                            className="border-b border-line last:border-0"
+                            className="border-b border-line transition last:border-0 hover:bg-surface/60"
                           >
                             <td className="py-3 pr-4">
                               <p className="font-bold text-ink">{appointment.service || '—'}</p>
-                              <p className="text-xs text-ink-soft">{reference}</p>
+                              <p className="font-mono text-[10px] text-ink-soft">{reference}</p>
                             </td>
                             <td className="py-3 pr-4">
                               <p className="font-semibold text-ink">
@@ -481,50 +537,79 @@ export default function AdminOverview() {
               )}
             </Card>
 
-            <Card>
-              <h3 className="flex items-center gap-2 text-base font-bold text-ink">
-                <Layers className="h-5 w-5 text-teal-deep" /> Quick Manage
-              </h3>
-              <div className="mt-4 flex flex-col gap-2">
-                <Button to="/admin/appointments" variant="secondary">
-                  <CalendarDays className="h-4 w-4" /> Manage Appointments
-                </Button>
-                <Button to="/admin/services" variant="secondary">
-                  <Scissors className="h-4 w-4" /> Manage Services
-                </Button>
-                <Button to="/admin/providers" variant="secondary">
-                  <UserCheck className="h-4 w-4" /> Manage Providers
-                </Button>
-                <Button to="/admin/customers" variant="secondary">
-                  <Users className="h-4 w-4" /> View Customers
-                </Button>
-                <Button to="/admin/working-hours" variant="secondary">
-                  <Clock className="h-4 w-4" /> Provider Schedules
-                </Button>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2 text-center">
-                <div className="rounded-xl bg-amber-50 px-3 py-2">
-                  <p className="text-lg font-bold text-amber-700">{stats.pendingAppointments}</p>
-                  <p className="text-[11px] font-semibold text-amber-700/80 uppercase">Pending</p>
+            <div className="space-y-4">
+              <Card>
+                <h3 className="flex items-center gap-2 text-base font-bold text-ink">
+                  <Layers className="h-5 w-5 text-teal-deep" aria-hidden="true" />
+                  Quick manage
+                </h3>
+                <div className="mt-4 flex flex-col gap-2">
+                  <Button to="/admin/appointments" variant="secondary" size="sm">
+                    <CalendarDays className="h-4 w-4" aria-hidden="true" /> Appointments
+                  </Button>
+                  <Button to="/admin/services" variant="secondary" size="sm">
+                    <Scissors className="h-4 w-4" aria-hidden="true" /> Services
+                  </Button>
+                  <Button to="/admin/providers" variant="secondary" size="sm">
+                    <UserCheck className="h-4 w-4" aria-hidden="true" /> Providers
+                  </Button>
+                  <Button to="/admin/customers" variant="secondary" size="sm">
+                    <Users className="h-4 w-4" aria-hidden="true" /> Customers
+                  </Button>
+                  <Button to="/admin/working-hours" variant="secondary" size="sm">
+                    <Clock className="h-4 w-4" aria-hidden="true" /> Working hours
+                  </Button>
                 </div>
-                <div className="rounded-xl bg-emerald-50 px-3 py-2">
-                  <p className="text-lg font-bold text-emerald-700">{stats.confirmedAppointments}</p>
-                  <p className="text-[11px] font-semibold text-emerald-700/80 uppercase">Confirmed</p>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-center">
+                  <div className="rounded-xl bg-amber-50 px-3 py-2 ring-1 ring-amber-100">
+                    <p className="text-lg font-bold text-amber-700">{stats.pendingAppointments}</p>
+                    <p className="text-[10px] font-bold tracking-wide text-amber-700/80 uppercase">
+                      Pending
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50 px-3 py-2 ring-1 ring-emerald-100">
+                    <p className="text-lg font-bold text-emerald-700">
+                      {stats.confirmedAppointments}
+                    </p>
+                    <p className="text-[10px] font-bold tracking-wide text-emerald-700/80 uppercase">
+                      Confirmed
+                    </p>
+                  </div>
                 </div>
+              </Card>
+
+              <div className="rounded-2xl border border-teal-100/80 bg-teal-50/60 p-4">
+                <p className="flex items-center gap-1.5 text-xs font-bold text-teal-deep">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  Availability is live
+                </p>
+                <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
+                  Working days, opening hours, breaks, and unavailable dates are stored in the
+                  database and used by booking availability.
+                </p>
+                <Link
+                  to="/admin/working-hours"
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-teal-deep hover:underline"
+                >
+                  Review schedules
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
               </div>
-              <p className="mt-3 text-xs text-ink-soft">
-                Working days, opening hours, breaks, and unavailable dates are saved to the database and used by booking availability.
-              </p>
-            </Card>
+            </div>
           </div>
         </>
       ) : null}
 
       {!loading && !data && !error ? (
         <EmptyBlock
-          icon={BarChart3}
+          icon={CalendarPlus}
           title="Dashboard data is unavailable"
           description="No statistics were returned. Try refreshing the page."
+          action={
+            <Button size="sm" onClick={() => load()}>
+              Refresh
+            </Button>
+          }
         />
       ) : null}
     </div>

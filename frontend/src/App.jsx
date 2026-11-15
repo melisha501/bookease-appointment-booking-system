@@ -39,6 +39,8 @@ import AdminCustomerDetails from './pages/AdminCustomerDetails';
 import PublicLayout from './layouts/PublicLayout';
 import DashboardLayout from './layouts/DashboardLayout';
 import ProtectedRoute from './components/ProtectedRoute';
+import ScrollToTop from './components/ScrollToTop';
+import NotFound from './pages/NotFound';
 import { useDemo } from './store/DemoContext';
 
 const customerMenu = [
@@ -71,7 +73,9 @@ export default function App() {
   );
 
   return (
-    <Routes>
+    <>
+      <ScrollToTop />
+      <Routes>
       {/* ----- Public pages ----- */}
       <Route path="/" element={<PublicLayout><Home /></PublicLayout>} />
       <Route path="/services" element={<PublicLayout><Services /></PublicLayout>} />
@@ -139,13 +143,11 @@ export default function App() {
         path="*"
         element={
           <PublicLayout>
-            <div className="mx-auto max-w-md px-4 py-24 text-center">
-              <h1 className="text-4xl font-bold text-ink">404</h1>
-              <p className="mt-3 text-ink-soft">The page you are looking for does not exist.</p>
-            </div>
+            <NotFound />
           </PublicLayout>
         }
       />
     </Routes>
+    </>
   );
 }

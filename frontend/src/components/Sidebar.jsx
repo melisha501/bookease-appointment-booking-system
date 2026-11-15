@@ -1,12 +1,10 @@
 // Sidebar — left navigation for DASHBOARD pages (Customer & Admin).
-// Pure UI component. It receives the menu from DashboardLayout, so the same
-// component works for both dashboards with different items.
-//
-// Desktop: fixed left panel (always visible on md+).
-// Mobile: slide-in drawer with a dark backdrop (open/close via props).
+// Desktop: fixed dark panel. Mobile: slide-in drawer with a dark backdrop.
 
-import { NavLink } from 'react-router-dom';
-import { CalendarCheck, X } from 'lucide-react';
+import { useEffect } from 'react';
+import { Link, NavLink } from 'react-router-dom';
+import { ArrowUpRight, X } from 'lucide-react';
+import Logo from './Logo';
 
 export default function Sidebar({
   items = [],
@@ -14,39 +12,37 @@ export default function Sidebar({
   onClose = () => {},
   roleLabel = 'Dashboard',
 }) {
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   const nav = (isMobile) => (
     <>
-      {/* Header */}
       <div className="flex items-center justify-between px-5 py-5">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-teal-deep text-white">
-            <CalendarCheck className="h-5 w-5" />
-          </span>
-          <span className="leading-tight">
-            <span className="block text-sm font-bold tracking-tight text-ink">
-              BookEase
-            </span>
-            <span className="block text-[11px] font-medium tracking-wide text-ink-soft uppercase">
-              {roleLabel}
-            </span>
-          </span>
-        </div>
-
-        {/* Close button — mobile only */}
-        {isMobile && (
+        <Logo variant="dark" subtitle={roleLabel} onClick={isMobile ? onClose : undefined} />
+        {isMobile ? (
           <button
             type="button"
             onClick={onClose}
             aria-label="Close dashboard menu"
-            className="rounded-lg p-2 text-ink hover:bg-slate-100 md:hidden"
+            className="rounded-xl p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
           >
             <X className="h-5 w-5" />
           </button>
-        )}
+        ) : null}
       </div>
 
-      {/* Links */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3" aria-label={roleLabel}>
+      <nav className="mt-2 flex-1 space-y-1 overflow-y-auto px-3 pb-4" aria-label={roleLabel}>
         {items.map((item) => {
           const Icon = item.icon;
           return (
@@ -56,51 +52,59 @@ export default function Sidebar({
               end={item.end || false}
               onClick={isMobile ? onClose : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
+                `group flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition duration-200 ${
                   isActive
-                    ? 'bg-teal-50 font-semibold text-teal-deep'
-                    : 'text-ink-soft hover:bg-slate-100 hover:text-ink'
+                    ? 'bg-teal-brand/15 text-white ring-1 ring-teal-glow/20'
+                    : 'text-white/60 hover:bg-white/5 hover:text-white'
                 }`
               }
             >
-              {Icon && <Icon className="h-5 w-5 shrink-0" />}
-              {item.label}
+              {({ isActive }) => (
+                <>
+                  {Icon ? (
+                    <span
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
+                        isActive ? 'bg-teal-brand text-white' : 'bg-white/5 text-white/70 group-hover:text-white'
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                  ) : null}
+                  <span className="truncate">{item.label}</span>
+                </>
+              )}
             </NavLink>
           );
         })}
       </nav>
 
-      {/* Bottom note */}
-      <div className="p-5">
-        <p className="rounded-2xl border border-line bg-gradient-to-br from-teal-50/60 to-white px-4 py-3 text-xs leading-relaxed text-ink-soft">
-          Signed in with your real account. Manage bookings and records from this dashboard.
-        </p>
+      <div className="border-t border-white/10 p-4">
+        <Link
+          to="/"
+          onClick={isMobile ? onClose : undefined}
+          className="flex items-center justify-between gap-2 rounded-xl bg-white/5 px-3.5 py-3 text-xs font-semibold text-white/70 ring-1 ring-white/10 transition hover:bg-white/10 hover:text-white"
+        >
+          Back to website
+          <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+        </Link>
       </div>
     </>
   );
 
   return (
     <>
-      {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-line bg-white md:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-ink md:flex">
         {nav(false)}
       </aside>
 
-      {/* Mobile drawer */}
-      {isOpen && (
-        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-ink/50"
-            onClick={onClose}
-            aria-hidden="true"
-          />
-          {/* Panel */}
-          <aside className="absolute inset-y-0 left-0 flex w-64 max-w-[85vw] flex-col bg-white shadow-xl">
+      {isOpen ? (
+        <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label={`${roleLabel} menu`}>
+          <div className="absolute inset-0 bg-ink/60 backdrop-blur-sm animate-fade-in" onClick={onClose} aria-hidden="true" />
+          <aside className="absolute inset-y-0 left-0 flex w-72 max-w-[86vw] flex-col bg-ink shadow-pop animate-fade-up">
             {nav(true)}
           </aside>
         </div>
-      )}
+      ) : null}
     </>
   );
 }
