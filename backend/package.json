@@ -15,7 +15,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "node src/seed.js",
-    "smoke": "node scripts/smoke-test.js"
+    "smoke": "node scripts/smoke-test.js",
+    "smoke:provider": "node scripts/provider-portal-smoke.js"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",

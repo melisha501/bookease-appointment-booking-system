@@ -13,6 +13,8 @@ const specialistRoutes = require("./routes/specialists");
 const appointmentRoutes = require("./routes/appointments");
 const customerRoutes = require("./routes/customers");
 const dashboardRoutes = require("./routes/dashboard");
+const providerRoutes = require("./routes/providers");
+const providerAdminRoutes = require("./routes/providerAdmin");
 
 const app = express();
 
@@ -108,6 +110,8 @@ app.use("/api/specialists", specialistRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/customers", customerRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/providers", providerRoutes);
+app.use("/api/admin", providerAdminRoutes);
 
 app.get("/", (_req, res) => {
   res.json({ message: "Appointment & Service Booking System API" });

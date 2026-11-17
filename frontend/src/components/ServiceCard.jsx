@@ -1,7 +1,7 @@
 // ServiceCard — consistent service tile used on Home, Services, and related views.
 // Displays key info and provides View Details + Book actions.
 
-import { ArrowRight, CalendarCheck, Clock, Image as ImageIcon, Star } from 'lucide-react';
+import { ArrowRight, CalendarCheck, Clock, Image as ImageIcon, Star, Store } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Badge from './Badge';
 
@@ -11,6 +11,8 @@ export default function ServiceCard({ service, showActions = true }) {
   const imageUrl = typeof service?.image === 'string' ? service.image.trim() : '';
   const detailsTo = `/services/${service?.id || ''}`;
   const bookTo = `/booking?service=${encodeURIComponent(service?.id || '')}`;
+  const providerSlug = service?.provider?.id || service?.providerSlug || '';
+  const providerName = service?.providerName || service?.provider?.name || '';
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-line/90 bg-white shadow-card transition duration-300 hover:-translate-y-1 hover:border-teal-100 hover:shadow-lift">
@@ -64,6 +66,36 @@ export default function ServiceCard({ service, showActions = true }) {
         <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-ink-soft">
           {service?.description || 'Service details are available on the details page.'}
         </p>
+
+        {providerName ? (
+          <div className="mt-3 flex items-center gap-2">
+            {service?.providerLogo || service?.provider?.logo ? (
+              <img
+                src={service.providerLogo || service.provider?.logo}
+                alt=""
+                loading="lazy"
+                className="h-6 w-6 shrink-0 rounded-lg border border-line object-cover"
+              />
+            ) : (
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-deep">
+                <Store className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+            )}
+            <span className="min-w-0 truncate text-xs text-ink-soft">
+              by{' '}
+              {providerSlug ? (
+                <Link
+                  to={`/providers/${providerSlug}`}
+                  className="font-semibold text-teal-deep hover:underline"
+                >
+                  {providerName}
+                </Link>
+              ) : (
+                <span className="font-semibold text-ink">{providerName}</span>
+              )}
+            </span>
+          </div>
+        ) : null}
 
         <div className="mt-4 flex items-center justify-between gap-3 border-t border-line/80 pt-4">
           <div className="min-w-0">

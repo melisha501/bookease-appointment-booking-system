@@ -13,8 +13,28 @@ function formatNpr(amount) {
   return `NPR ${n.toLocaleString("en-IN")}`;
 }
 
+function providerToClient(provider) {
+  if (!provider) return null;
+  return {
+    id: provider.slug || provider.id,
+    dbId: provider.id,
+    slug: provider.slug,
+    name: provider.name,
+    type: provider.type || "INDIVIDUAL",
+    description: provider.description || "",
+    email: provider.email || "",
+    phone: provider.phone || "",
+    address: provider.address || "",
+    website: provider.website || "",
+    logo: provider.logoUrl || "",
+    status: provider.status || "pending",
+    isActive: provider.isActive !== false,
+  };
+}
+
 function serviceToClient(service) {
   if (!service) return null;
+  const provider = service.provider ? providerToClient(service.provider) : null;
   return {
     id: service.slug || service.id,
     dbId: service.id,
@@ -30,6 +50,16 @@ function serviceToClient(service) {
     image: service.imageUrl || "",
     benefits: Array.isArray(service.benefits) ? service.benefits : [],
     isActive: service.isActive !== false,
+    approvalStatus: service.approvalStatus || "approved",
+    isPublished:
+      service.isActive !== false &&
+      (service.approvalStatus || "approved") === "approved" &&
+      (!service.providerId || (provider && provider.status === "approved" && provider.isActive)),
+    providerId: service.providerId || null,
+    providerName: provider?.name || "",
+    providerSlug: provider?.slug || "",
+    providerLogo: provider?.logo || "",
+    provider,
   };
 }
 
@@ -46,6 +76,10 @@ function specialistToClient(specialist, includeSchedule = false) {
     rating: specialist.rating ?? 5,
     specialty: specialist.specialty || "",
     image: specialist.imageUrl || "",
+    providerId: specialist.providerId || null,
+    providerName: specialist.provider?.name || "",
+    providerSlug: specialist.provider?.slug || "",
+    providerLogo: specialist.provider?.logoUrl || "",
   };
   if (includeSchedule && specialist.schedules) {
     // schema has one WorkingHour per specialist (unique specialistId)
@@ -174,18 +208,32 @@ async function deleteCategory(req, res, next) {
   }
 }
 
+// Public catalog visibility: a service must be published (isActive), approved
+// by an admin, and either belong to no provider or to an approved/active
+// provider. Existing admin-created services (providerId null) keep working.
+function publicServiceVisibility() {
+  return [
+    { isActive: true },
+    { approvalStatus: "approved" },
+    {
+      OR: [
+        { providerId: null },
+        { provider: { is: { status: "approved", isActive: true } } },
+      ],
+    },
+  ];
+}
+
 async function listServices(req, res, next) {
   try {
     const { category } = req.query;
-    const where = {};
+    const conditions = publicServiceVisibility();
     if (category && category !== "all") {
-      where.category = { slug: String(category) };
+      conditions.push({ category: { slug: String(category) } });
     }
-    // Public catalog shows active services by default
-    where.isActive = true;
     const services = await prisma.service.findMany({
-      where,
-      include: { category: true },
+      where: { AND: conditions },
+      include: { category: true, provider: true },
       orderBy: { name: "asc" },
     });
     res.json({ success: true, services: services.map(serviceToClient) });
@@ -198,13 +246,19 @@ async function getService(req, res, next) {
   try {
     const key = req.params.id; // slug or cuid
     const service = await prisma.service.findFirst({
-      where: { OR: [{ slug: key }, { id: key }], isActive: true },
+      where: {
+        AND: [
+          { OR: [{ slug: key }, { id: key }] },
+          ...publicServiceVisibility(),
+        ],
+      },
       include: {
         category: true,
+        provider: true,
         specialists: {
           where: { specialist: { isActive: true } },
           include: {
-            specialist: { include: { schedules: true } },
+            specialist: { include: { schedules: true, provider: true } },
           },
         },
       },
@@ -225,7 +279,13 @@ async function getService(req, res, next) {
 async function listSpecialists(req, res, next) {
   try {
     const { serviceId, service: serviceSlug } = req.query;
-    const where = { isActive: true };
+    const where = {
+      isActive: true,
+      OR: [
+        { providerId: null },
+        { provider: { is: { status: "approved", isActive: true } } },
+      ],
+    };
     const svcKey = serviceId || serviceSlug;
     if (svcKey) {
       where.services = {
@@ -239,7 +299,11 @@ async function listSpecialists(req, res, next) {
     }
     const specialists = await prisma.specialist.findMany({
       where,
-      include: { schedules: true, services: { include: { service: { select: { slug: true, isActive: true } } } } },
+      include: {
+        provider: true,
+        schedules: true,
+        services: { include: { service: { select: { slug: true, isActive: true } } } },
+      },
       orderBy: { name: "asc" },
     });
     res.json({
@@ -255,12 +319,23 @@ async function getSpecialist(req, res, next) {
   try {
     const key = req.params.id; // slug or cuid
     const specialist = await prisma.specialist.findFirst({
-      where: { OR: [{ slug: key }, { id: key }], isActive: true },
+      where: {
+        AND: [
+          { OR: [{ slug: key }, { id: key }], isActive: true },
+          {
+            OR: [
+              { providerId: null },
+              { provider: { is: { status: "approved", isActive: true } } },
+            ],
+          },
+        ],
+      },
       include: {
+        provider: true,
         schedules: true,
         services: {
-          where: { service: { isActive: true } },
-          include: { service: { include: { category: true } } },
+          where: { service: { isActive: true, approvalStatus: "approved" } },
+          include: { service: { include: { category: true, provider: true } } },
         },
       },
     });
@@ -492,7 +567,7 @@ async function uploadServiceImage(req, res, next) {
       updated = await prisma.service.update({
         where: { id: service.id },
         data: { imageUrl: upload.url },
-        include: { category: true },
+        include: { category: true, provider: true },
       });
     } catch (err) {
       // The database still points at the old image; remove the new orphan file.
@@ -565,7 +640,7 @@ async function removeServiceImage(req, res, next) {
     const updated = await prisma.service.update({
       where: { id: service.id },
       data: { imageUrl: null }, // remove the database reference; the record is preserved
-      include: { category: true },
+      include: { category: true, provider: true },
     });
 
     const cleanup = await cleanupUnusedImage(previousImageUrl);
@@ -714,7 +789,7 @@ async function createService(req, res, next) {
         benefits: Array.isArray(body.benefits) ? body.benefits.map(String) : [],
         isActive: body.isActive !== false,
       },
-      include: { category: true },
+      include: { category: true, provider: true },
     });
     res.status(201).json({ success: true, message: "Service created.", service: serviceToClient(created) });
   } catch (err) {
@@ -755,10 +830,13 @@ async function updateService(req, res, next) {
     if (body.rating != null && Number.isFinite(Number(body.rating))) data.rating = Number(body.rating);
     if (body.benefits != null) data.benefits = Array.isArray(body.benefits) ? body.benefits.map(String) : [];
     if (body.isActive != null) data.isActive = Boolean(body.isActive);
+    if (body.approvalStatus != null && ["pending", "approved", "rejected"].includes(String(body.approvalStatus))) {
+      data.approvalStatus = String(body.approvalStatus);
+    }
     // imageUrl is managed exclusively by the UploadThing endpoint below.
     // Omitting it here ensures editing other fields never removes an image.
 
-    const updated = await prisma.service.update({ where: { id: existing.id }, data, include: { category: true } });
+    const updated = await prisma.service.update({ where: { id: existing.id }, data, include: { category: true, provider: true } });
     res.json({ success: true, message: "Service updated.", service: serviceToClient(updated) });
   } catch (err) {
     if (err && err.code === "P2002") return res.status(409).json({ success: false, message: "A service with this identifier already exists." });
@@ -850,5 +928,12 @@ module.exports = {
   removeSpecialistImage,
   serviceToClient,
   specialistToClient,
+  providerToClient,
   formatNpr,
+  uniqueSlug,
+  parseNprToInt,
+  resolveCategoryId,
+  cleanupUnusedImage,
+  withImageCleanup,
+  discardNewUpload,
 };

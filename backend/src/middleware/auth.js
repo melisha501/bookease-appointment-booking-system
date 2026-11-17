@@ -46,6 +46,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireProvider(req, res, next) {
+  if (!req.user || req.user.role !== "PROVIDER") {
+    return res.status(403).json({ success: false, message: "Provider access required." });
+  }
+  next();
+}
+
 // Optional auth: attaches user if token is valid, but does not block guests.
 async function optionalAuth(req, _res, next) {
   const header = req.headers.authorization || "";
@@ -64,4 +71,4 @@ async function optionalAuth(req, _res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireAdmin, optionalAuth };
+module.exports = { requireAuth, requireAdmin, requireProvider, optionalAuth };

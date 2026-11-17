@@ -302,6 +302,16 @@ export function DemoProvider({ children }) {
     return data;
   }, []);
 
+  const registerProvider = useCallback(async (payload) => {
+    const data = await api.post("/auth/register-provider", payload, {
+      timeout: 30000,
+      retries: 0,
+    });
+    if (data.token) setToken(data.token);
+    setUser(data.user || null);
+    return data;
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.post("/auth/logout", {}, { timeout: 6000, retries: 0 });
@@ -406,12 +416,14 @@ export function DemoProvider({ children }) {
       user,
       isLoggedIn: Boolean(user),
       isAdmin: user?.role === "ADMIN",
+      isProvider: user?.role === "PROVIDER",
       authLoading,
       catalogLoading,
       catalogError,
       refreshCatalog,
       login,
       register,
+      registerProvider,
       logout,
       refreshUser,
       createBooking,
@@ -437,6 +449,7 @@ export function DemoProvider({ children }) {
       refreshCatalog,
       login,
       register,
+      registerProvider,
       logout,
       refreshUser,
       createBooking,

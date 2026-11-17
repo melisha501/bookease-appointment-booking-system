@@ -328,6 +328,17 @@ export default function BookingDetails() {
             </div>
             <div className="min-w-0">
               <h2 className="truncate text-h3">{appointment.service}</h2>
+              {appointment.providerName ? (
+                <p className="mt-0.5 truncate text-xs font-semibold text-teal-deep">
+                  {appointment.providerId ? (
+                    <Link to={`/providers/${appointment.providerId}`} className="hover:underline">
+                      {appointment.providerName}
+                    </Link>
+                  ) : (
+                    appointment.providerName
+                  )}
+                </p>
+              ) : null}
               <p className="mt-0.5 truncate text-sm text-ink-soft">with {appointment.specialist}</p>
               <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-soft">
                 <span className="inline-flex items-center gap-1.5">
@@ -445,6 +456,23 @@ export default function BookingDetails() {
                   {service.categoryName ? (
                     <p className="mt-1 text-[11px] font-bold tracking-wide text-teal-deep uppercase">
                       {service.categoryName}
+                    </p>
+                  ) : null}
+                  {appointment.providerName || service.providerName ? (
+                    <p className="mt-1 text-xs text-ink-soft">
+                      Provided by{' '}
+                      {appointment.providerId || service.provider?.id || service.providerSlug ? (
+                        <Link
+                          to={`/providers/${appointment.providerId || service.provider?.id || service.providerSlug}`}
+                          className="font-semibold text-teal-deep hover:underline"
+                        >
+                          {appointment.providerName || service.providerName}
+                        </Link>
+                      ) : (
+                        <span className="font-semibold text-ink">
+                          {appointment.providerName || service.providerName}
+                        </span>
+                      )}
                     </p>
                   ) : null}
                   <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-ink-soft">

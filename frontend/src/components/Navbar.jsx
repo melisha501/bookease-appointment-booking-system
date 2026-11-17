@@ -9,11 +9,21 @@ import Logo from './Logo';
 import Button from './Button';
 import { useDemo } from '../store/DemoContext';
 
+// Mobile keeps the full public menu; the desktop bar is trimmed so the
+// "Become a Service Provider" entry point fits alongside the auth actions.
 const links = [
   { label: 'Home', to: '/' },
-  { label: 'Services', to: '/services' },
+  { label: 'Book Services', to: '/services' },
   { label: 'Specialists', to: '/specialists' },
+  { label: 'Providers', to: '/providers' },
   { label: 'Booking', to: '/booking' },
+];
+
+const desktopLinks = [
+  { label: 'Book Services', to: '/services' },
+  { label: 'Specialists', to: '/specialists' },
+  { label: 'Providers', to: '/providers' },
+  { label: 'Become a Service Provider', to: '/provider/register', accent: true },
 ];
 
 function navLinkClass({ isActive }) {
@@ -35,10 +45,11 @@ function initials(name) {
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
-  const { isLoggedIn, user, isAdmin, logout } = useDemo();
+  const { isLoggedIn, user, logout } = useDemo();
   const navigate = useNavigate();
   const location = useLocation();
-  const dashboardTo = isAdmin ? '/admin' : '/customer';
+  const dashboardTo =
+    user?.role === 'ADMIN' ? '/admin' : user?.role === 'PROVIDER' ? '/provider' : '/customer';
 
   // Close the drawer whenever the route changes (including back/forward).
   useEffect(() => {
@@ -66,16 +77,29 @@ export default function Navbar() {
       <div className="container-page flex h-[4.5rem] items-center justify-between gap-4">
         <Logo onClick={() => setOpen(false)} />
 
-        <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
-          {links.map((link) => (
-            <NavLink key={link.to} to={link.to} end={link.to === '/'} className={navLinkClass}>
+        <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
+          {desktopLinks.map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              className={
+                link.accent
+                  ? ({ isActive }) =>
+                      `rounded-xl px-3.5 py-2 text-sm font-semibold transition duration-200 ${
+                        isActive
+                          ? 'bg-teal-deep text-white'
+                          : 'bg-teal-50 text-teal-deep hover:bg-teal-100'
+                      }`
+                  : navLinkClass
+              }
+            >
               {link.label}
             </NavLink>
           ))}
         </nav>
 
         {/* Desktop auth area */}
-        <div className="hidden items-center gap-2.5 md:flex">
+        <div className="hidden items-center gap-2.5 lg:flex">
           {isLoggedIn ? (
             <>
               <NavLink
@@ -95,8 +119,11 @@ export default function Navbar() {
             </>
           ) : (
             <>
+              <Button to="/provider/login" variant="ghost" size="sm">
+                Provider login
+              </Button>
               <Button to="/login" variant="ghost" size="sm">
-                Login
+                Customer login
               </Button>
               <Button to="/register" size="sm">
                 Create account
@@ -105,7 +132,7 @@ export default function Navbar() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 md:hidden">
+        <div className="flex items-center gap-2 lg:hidden">
           <Button to="/booking" size="sm" className="hidden sm:inline-flex">
             <CalendarCheck className="h-4 w-4" aria-hidden="true" />
             Book
@@ -124,7 +151,7 @@ export default function Navbar() {
       </div>
 
       {open ? (
-        <div className="fixed inset-0 top-[4.5rem] z-40 md:hidden">
+        <div className="fixed inset-0 top-[4.5rem] z-40 lg:hidden">
           <div
             className="absolute inset-0 bg-ink/40 backdrop-blur-sm animate-fade-in"
             onClick={() => setOpen(false)}
@@ -179,10 +206,16 @@ export default function Navbar() {
               ) : (
                 <>
                   <Button to="/login" variant="secondary" fullWidth onClick={() => setOpen(false)}>
-                    Login
+                    Customer login
+                  </Button>
+                  <Button to="/provider/login" variant="secondary" fullWidth onClick={() => setOpen(false)}>
+                    Provider login
+                  </Button>
+                  <Button to="/provider/register" variant="soft" fullWidth onClick={() => setOpen(false)}>
+                    Become a service provider
                   </Button>
                   <Button to="/register" fullWidth onClick={() => setOpen(false)}>
-                    Create account
+                    Create customer account
                   </Button>
                 </>
               )}

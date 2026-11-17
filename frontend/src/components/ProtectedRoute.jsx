@@ -19,22 +19,25 @@ function SessionSkeleton() {
   );
 }
 
+function dashboardForRole(role) {
+  if (role === 'ADMIN') return '/admin';
+  if (role === 'PROVIDER') return '/provider';
+  return '/customer';
+}
+
 export default function ProtectedRoute({ children, role }) {
-  const { isLoggedIn, isAdmin, authLoading, user } = useDemo();
+  const { isLoggedIn, authLoading, user } = useDemo();
   const location = useLocation();
 
   if (authLoading) return <SessionSkeleton />;
 
   if (!isLoggedIn) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    const loginTo = role === 'PROVIDER' ? '/provider/login' : '/login';
+    return <Navigate to={loginTo} replace state={{ from: location }} />;
   }
 
-  if (role === 'ADMIN' && !isAdmin) {
-    return <Navigate to="/customer" replace />;
-  }
-
-  if (role === 'CUSTOMER' && user?.role === 'ADMIN') {
-    return <Navigate to="/admin" replace />;
+  if (role && user?.role !== role) {
+    return <Navigate to={dashboardForRole(user?.role)} replace />;
   }
 
   return children;

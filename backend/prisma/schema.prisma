@@ -14,7 +14,25 @@ datasource db {
 
 enum Role {
   CUSTOMER
+  PROVIDER
   ADMIN
+}
+
+enum ProviderType {
+  INDIVIDUAL
+  ORGANIZATION
+}
+
+enum ProviderStatus {
+  pending
+  approved
+  rejected
+}
+
+enum ServiceApprovalStatus {
+  pending
+  approved
+  rejected
 }
 
 enum AppointmentStatus {
@@ -34,8 +52,33 @@ model User {
   address      String?
   role         Role          @default(CUSTOMER)
   appointments Appointment[] @relation("CustomerAppointments")
+  provider     Provider?     @relation("ProviderOwner")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+}
+
+// A service provider account. One login (User with role PROVIDER) owns exactly
+// one provider profile. Services and a bookable specialist record are linked to
+// this profile. Status is reviewed by an administrator before public exposure.
+model Provider {
+  id          String       @id @default(cuid())
+  ownerId     String       @unique
+  owner       User         @relation("ProviderOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String       @unique
+  type        ProviderType @default(INDIVIDUAL)
+  description String?
+  email       String?
+  phone       String?
+  address     String?
+  website     String?
+  logoUrl     String?
+  status      ProviderStatus @default(pending)
+  isActive    Boolean      @default(true)
+  services    Service[]
+  specialists Specialist[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 }
 
 model Category {
@@ -58,10 +101,15 @@ model Service {
   benefits     String[]            @default([])
   rating       Float               @default(5.0)
   isActive     Boolean             @default(true)
+  providerId   String?
+  provider     Provider?           @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  approvalStatus ServiceApprovalStatus @default(approved)
   specialists  SpecialistService[]
   appointments Appointment[]
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
+
+  @@index([providerId])
 }
 
 model Specialist {
@@ -75,12 +123,16 @@ model Specialist {
   specialty      String                    // display label, e.g. "Clinics"
   imageUrl       String?
   isActive       Boolean                   @default(true)
+  providerId     String?
+  provider       Provider?                 @relation(fields: [providerId], references: [id], onDelete: SetNull)
   services       SpecialistService[]
   schedules      WorkingHour[]
   dateExceptions SpecialistDateException[]
   appointments   Appointment[]
   createdAt      DateTime                  @default(now())
   updatedAt      DateTime                  @updatedAt
+
+  @@index([providerId])
 }
 
 // Many-to-many: which specialists can perform which services

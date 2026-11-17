@@ -4,6 +4,7 @@
 
 function appointmentToClient(appointment) {
   if (!appointment) return null;
+  const provider = appointment.service?.provider || null;
   return {
     id: appointment.reference, // frontend uses reference as id in many places
     reference: appointment.reference,
@@ -17,8 +18,15 @@ function appointmentToClient(appointment) {
     email: appointment.customerEmail,
     service: appointment.service?.name || "",
     serviceId: appointment.service?.slug || appointment.serviceId,
+    serviceDbId: appointment.serviceId,
+    serviceImage: appointment.service?.imageUrl || "",
     specialist: appointment.specialist?.name || "",
     specialistId: appointment.specialist?.slug || appointment.specialistId,
+    providerId: provider?.slug || appointment.service?.providerId || null,
+    providerDbId: provider?.id || appointment.service?.providerId || null,
+    providerName: provider?.name || "",
+    providerLogo: provider?.logoUrl || "",
+    providerType: provider?.type || "",
     date: appointment.date,
     time: appointment.time,
     status: appointment.status,

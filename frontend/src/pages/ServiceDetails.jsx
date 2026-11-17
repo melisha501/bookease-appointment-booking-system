@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Store,
   UserRound,
 } from 'lucide-react';
 
@@ -169,6 +170,45 @@ export default function ServiceDetails() {
             <p className="mt-4 max-w-2xl text-[15px] leading-relaxed text-ink-soft">
               {service.description || 'Full details for this service are available on request.'}
             </p>
+
+            {service.providerName ? (
+              <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-line/80 bg-white p-3.5 shadow-soft">
+                {service.providerLogo ? (
+                  <img
+                    src={service.providerLogo}
+                    alt=""
+                    className="h-10 w-10 shrink-0 rounded-xl border border-line object-cover"
+                  />
+                ) : (
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-deep ring-1 ring-teal-100">
+                    <Store className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-bold tracking-wide text-ink-soft uppercase">
+                    Provided by
+                  </p>
+                  <Link
+                    to={`/providers/${service.provider?.id || service.providerSlug}`}
+                    className="truncate text-sm font-bold text-ink transition hover:text-teal-deep"
+                  >
+                    {service.providerName}
+                  </Link>
+                </div>
+                {service.provider?.type ? (
+                  <Badge variant="muted">
+                    {service.provider.type === 'ORGANIZATION' ? 'Organization' : 'Individual'}
+                  </Badge>
+                ) : null}
+                <Link
+                  to={`/providers/${service.provider?.id || service.providerSlug}`}
+                  className="inline-flex shrink-0 items-center gap-1 text-xs font-bold text-teal-deep hover:underline"
+                >
+                  View profile
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
+              </div>
+            ) : null}
           </div>
 
           {benefits.length ? (
@@ -277,7 +317,20 @@ export default function ServiceDetails() {
 
             <div className="space-y-4 p-6">
               <dl className="space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
+                {service.providerName ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-ink-soft">Provider</dt>
+                    <dd className="min-w-0 truncate text-right font-semibold text-ink">
+                      <Link
+                        to={`/providers/${service.provider?.id || service.providerSlug}`}
+                        className="transition hover:text-teal-deep hover:underline"
+                      >
+                        {service.providerName}
+                      </Link>
+                    </dd>
+                  </div>
+                ) : null}
+                <div className={`flex items-center justify-between gap-3 ${service.providerName ? 'border-t border-line/80 pt-3' : ''}`}>
                   <dt className="text-ink-soft">Duration</dt>
                   <dd className="font-semibold text-ink">
                     {service.duration ? `${service.duration} minutes` : 'Flexible'}

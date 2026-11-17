@@ -341,7 +341,7 @@ async function createAppointment(req, res, next) {
           status: "pending",
           notes: notes ? String(notes) : null,
         },
-        include: { service: true, specialist: true },
+        include: { service: { include: { provider: true } }, specialist: true },
       });
     });
 
@@ -368,7 +368,7 @@ async function listMine(req, res, next) {
   try {
     const items = await prisma.appointment.findMany({
       where: { customerId: req.user.id },
-      include: { service: true, specialist: true },
+      include: { service: { include: { provider: true } }, specialist: true },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     });
     res.json({ success: true, appointments: items.map(appointmentToClient) });
@@ -391,7 +391,7 @@ async function cancelMine(req, res, next) {
     const { reference } = req.params;
     const appt = await prisma.appointment.findFirst({
       where: { reference, customerId: req.user.id },
-      include: { service: true, specialist: true },
+      include: { service: { include: { provider: true } }, specialist: true },
     });
     if (!appt) return res.status(404).json({ success: false, message: "Appointment not found." });
 
@@ -406,7 +406,7 @@ async function cancelMine(req, res, next) {
     const updated = await prisma.appointment.update({
       where: { id: appt.id },
       data: { status: APPOINTMENT_STATUS.CANCELLED },
-      include: { service: true, specialist: true },
+      include: { service: { include: { provider: true } }, specialist: true },
     });
 
     // Best-effort cancellation email; the status update is already persisted.
@@ -422,7 +422,11 @@ async function cancelMine(req, res, next) {
 async function listAll(_req, res, next) {
   try {
     const items = await prisma.appointment.findMany({
-      include: { service: true, specialist: true, customer: { select: { id: true, name: true, email: true } } },
+      include: {
+        service: { include: { provider: true } },
+        specialist: true,
+        customer: { select: { id: true, name: true, email: true } },
+      },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     });
     res.json({ success: true, appointments: items.map(appointmentToClient) });
@@ -467,7 +471,7 @@ async function updateStatus(req, res, next) {
     const updated = await prisma.appointment.update({
       where: { id: appt.id },
       data: { status: nextStatus },
-      include: { service: true, specialist: true },
+      include: { service: { include: { provider: true } }, specialist: true },
     });
 
     // Best-effort emails. Approval gets its own confirmation email; other

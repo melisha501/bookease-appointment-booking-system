@@ -106,7 +106,7 @@ export default function MyAppointments() {
     return appointments.filter((item) => {
       const matchesSearch =
         !term ||
-        [item.service, item.specialist, item.reference || item.id]
+        [item.service, item.specialist, item.providerName, item.reference || item.id]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -326,7 +326,16 @@ export default function MyAppointments() {
                             </span>
                           ) : null}
                         </td>
-                        <td className="px-5 py-4 text-ink-soft">{item.specialist}</td>
+                        <td className="px-5 py-4 text-ink-soft">
+                          {item.providerName ? (
+                            <>
+                              <span className="block font-semibold text-ink">{item.providerName}</span>
+                              <span className="block text-xs">{item.specialist}</span>
+                            </>
+                          ) : (
+                            item.specialist
+                          )}
+                        </td>
                         <td className="px-5 py-4 whitespace-nowrap">
                           <span className="block text-ink">{formatDate(item.date)}</span>
                           <span className="text-xs text-ink-soft">{item.time}</span>
@@ -390,7 +399,10 @@ export default function MyAppointments() {
                         <p className="line-clamp-2 text-sm font-bold text-ink">{item.service}</p>
                         <StatusBadge status={item.status} />
                       </div>
-                      <p className="mt-0.5 truncate text-xs text-ink-soft">with {item.specialist}</p>
+                      <p className="mt-0.5 truncate text-xs text-ink-soft">
+                        with {item.providerName || item.specialist}
+                        {item.providerName && item.specialist ? ` · ${item.specialist}` : ''}
+                      </p>
                       <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-soft">
                         <Clock className="h-3.5 w-3.5" aria-hidden="true" />
                         {item.time} · {ref}

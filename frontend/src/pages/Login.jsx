@@ -21,10 +21,11 @@ import { useDemo } from '../store/DemoContext';
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
-export default function Login() {
+export default function Login({ portal = 'customer' }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, user, isLoggedIn, authLoading } = useDemo();
+  const providerMode = portal === 'provider';
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -43,11 +44,13 @@ export default function Login() {
     return () => clearTimeout(timer);
   }, [loading]);
 
+  const roleHome = user?.role === 'ADMIN' ? '/admin' : user?.role === 'PROVIDER' ? '/provider' : '/customer';
+
   // Already signed in? Go straight to the right dashboard.
   useEffect(() => {
     if (authLoading || !isLoggedIn) return;
-    navigate(user?.role === 'ADMIN' ? '/admin' : '/customer', { replace: true });
-  }, [authLoading, isLoggedIn, user, navigate]);
+    navigate(roleHome, { replace: true });
+  }, [authLoading, isLoggedIn, roleHome, navigate]);
 
   const update = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -77,10 +80,10 @@ export default function Login() {
       const fromMatchesRole =
         from &&
         ((role === 'ADMIN' && from.startsWith('/admin')) ||
+          (role === 'PROVIDER' && from.startsWith('/provider')) ||
           (role === 'CUSTOMER' && from.startsWith('/customer')));
-      navigate(fromMatchesRole ? from : role === 'ADMIN' ? '/admin' : '/customer', {
-        replace: true,
-      });
+      const fallback = role === 'ADMIN' ? '/admin' : role === 'PROVIDER' ? '/provider' : '/customer';
+      navigate(fromMatchesRole ? from : fallback, { replace: true });
     } catch (err) {
       const retryAfter = Number(err?.data?.retryAfterSeconds);
       if (retryAfter > 0) {
@@ -101,26 +104,49 @@ export default function Login() {
 
   return (
     <AuthShell
-      eyebrow="Welcome back"
-      title="Sign in and pick up where you left off"
-      description="Manage upcoming appointments, keep your details current, and rebook your favourite services in a few taps."
-      points={[
-        'See every booking and its live status in one place.',
-        'Cancel or review appointments without calling the studio.',
-        'Your contact details are pre-filled at checkout.',
-      ]}
+      eyebrow={providerMode ? 'Provider portal' : 'Welcome back'}
+      title={providerMode ? 'Manage your services and bookings' : 'Sign in and pick up where you left off'}
+      description={
+        providerMode
+          ? 'Publish services, manage availability, and confirm customer appointments from one provider dashboard.'
+          : 'Manage upcoming appointments, keep your details current, and rebook your favourite services in a few taps.'
+      }
+      points={
+        providerMode
+          ? [
+              'Create and edit your own services.',
+              'Track pending and confirmed bookings.',
+              'Update your profile, logo, and availability.',
+            ]
+          : [
+              'See every booking and its live status in one place.',
+              'Cancel or review appointments without calling the studio.',
+              'Your contact details are pre-filled at checkout.',
+            ]
+      }
     >
       <div>
         <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-teal-deep uppercase">
           <CalendarCheck className="h-4 w-4" aria-hidden="true" />
-          Account login
+          {providerMode ? 'Provider login' : 'Customer account login'}
         </div>
-        <h2 className="mt-2 text-h2">Welcome back</h2>
+        <h2 className="mt-2 text-h2">{providerMode ? 'Provider sign in' : 'Welcome back'}</h2>
         <p className="mt-1 text-sm text-ink-soft">
-          New to BookEase?{' '}
-          <Link to="/register" className="font-semibold text-teal-deep hover:underline">
-            Create an account
-          </Link>
+          {providerMode ? (
+            <>
+              New provider?{' '}
+              <Link to="/provider/register" className="font-semibold text-teal-deep hover:underline">
+                Create a provider account
+              </Link>
+            </>
+          ) : (
+            <>
+              New to BookEase?{' '}
+              <Link to="/register" className="font-semibold text-teal-deep hover:underline">
+                Create an account
+              </Link>
+            </>
+          )}
         </p>
 
         <form onSubmit={handleSubmit} className="mt-7 space-y-4" noValidate>

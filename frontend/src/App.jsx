@@ -1,11 +1,14 @@
 // App — defines the app's routes.
-// - Public (PublicLayout): Home, Services, Service Details, Specialists, Booking, Login, Register
+// - Public (PublicLayout): Home, Services, Provider directory, Specialists, Booking, logins
 // - Customer (DashboardLayout + ProtectedRoute role CUSTOMER): dashboard pages
+// - Provider (DashboardLayout + ProtectedRoute role PROVIDER): provider dashboard pages
 // - Admin (DashboardLayout + ProtectedRoute role ADMIN): management pages
-// Auth is backed by the Express API (JWT). Other data is being migrated step by step.
+// Auth is backed by the Express API (JWT). All portals share one database.
 
 import { Routes, Route } from 'react-router-dom';
 import {
+  BadgeCheck,
+  CalendarClock,
   CalendarDays,
   Clock,
   FileText,
@@ -13,6 +16,7 @@ import {
   LayoutDashboard,
   Scissors,
   User,
+  UserRound,
   Users,
 } from 'lucide-react';
 
@@ -24,6 +28,14 @@ import SpecialistDetails from './pages/SpecialistDetails';
 import Booking from './pages/Booking';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Providers from './pages/Providers';
+import ProviderDetails from './pages/ProviderDetails';
+import ProviderRegister from './pages/ProviderRegister';
+import ProviderOverview from './pages/ProviderOverview';
+import ProviderServices from './pages/ProviderServices';
+import ProviderAppointments from './pages/ProviderAppointments';
+import ProviderAvailability from './pages/ProviderAvailability';
+import ProviderProfile from './pages/ProviderProfile';
 import CustomerOverview from './pages/CustomerOverview';
 import MyAppointments from './pages/MyAppointments';
 import BookingDetails from './pages/BookingDetails';
@@ -33,6 +45,7 @@ import AdminAppointments from './pages/AdminAppointments';
 import AdminServices from './pages/AdminServices';
 import AdminCategories from './pages/AdminCategories';
 import AdminProviders from './pages/AdminProviders';
+import AdminApprovals from './pages/AdminApprovals';
 import AdminWorkingHours from './pages/AdminWorkingHours';
 import AdminCustomers from './pages/AdminCustomers';
 import AdminCustomerDetails from './pages/AdminCustomerDetails';
@@ -56,8 +69,17 @@ const adminMenu = [
   { label: 'Services', to: '/admin/services', icon: Scissors },
   { label: 'Categories', to: '/admin/categories', icon: Layers },
   { label: 'Providers', to: '/admin/providers', icon: User },
+  { label: 'Approvals', to: '/admin/approvals', icon: BadgeCheck },
   { label: 'Working Hours', to: '/admin/working-hours', icon: Clock },
   { label: 'Customers', to: '/admin/customers', icon: Users },
+];
+
+const providerMenu = [
+  { label: 'Overview', to: '/provider', icon: LayoutDashboard, end: true },
+  { label: 'My Services', to: '/provider/services', icon: Scissors },
+  { label: 'Appointments', to: '/provider/appointments', icon: CalendarDays },
+  { label: 'Availability', to: '/provider/availability', icon: CalendarClock },
+  { label: 'Provider Profile', to: '/provider/profile', icon: UserRound },
 ];
 
 export default function App() {
@@ -72,6 +94,20 @@ export default function App() {
     </ProtectedRoute>
   );
 
+  const providerLayout = (title, subtitle, page) => (
+    <ProtectedRoute role="PROVIDER">
+      <DashboardLayout
+        items={providerMenu}
+        title={title}
+        subtitle={subtitle}
+        userName={user?.name || 'Provider'}
+        roleLabel="Provider"
+      >
+        {page}
+      </DashboardLayout>
+    </ProtectedRoute>
+  );
+
   return (
     <>
       <ScrollToTop />
@@ -80,11 +116,15 @@ export default function App() {
       <Route path="/" element={<PublicLayout><Home /></PublicLayout>} />
       <Route path="/services" element={<PublicLayout><Services /></PublicLayout>} />
       <Route path="/services/:id" element={<PublicLayout><ServiceDetails /></PublicLayout>} />
+      <Route path="/providers" element={<PublicLayout><Providers /></PublicLayout>} />
+      <Route path="/providers/:id" element={<PublicLayout><ProviderDetails /></PublicLayout>} />
       <Route path="/specialists" element={<PublicLayout><Specialists /></PublicLayout>} />
       <Route path="/specialists/:id" element={<PublicLayout><SpecialistDetails /></PublicLayout>} />
       <Route path="/booking" element={<PublicLayout><Booking /></PublicLayout>} />
       <Route path="/login" element={<PublicLayout><Login /></PublicLayout>} />
       <Route path="/register" element={<PublicLayout><Register /></PublicLayout>} />
+      <Route path="/provider/login" element={<PublicLayout><Login portal="provider" /></PublicLayout>} />
+      <Route path="/provider/register" element={<PublicLayout><ProviderRegister /></PublicLayout>} />
 
       {/* ----- Customer dashboard (protected) ----- */}
       <Route
@@ -128,12 +168,20 @@ export default function App() {
         }
       />
 
+      {/* ----- Provider dashboard (protected) ----- */}
+      <Route path="/provider" element={providerLayout('Provider Overview', 'Welcome back', <ProviderOverview />)} />
+      <Route path="/provider/services" element={providerLayout('My Services', 'Create, publish & manage your catalog', <ProviderServices />)} />
+      <Route path="/provider/appointments" element={providerLayout('Appointments', 'Bookings for your services', <ProviderAppointments />)} />
+      <Route path="/provider/availability" element={providerLayout('Availability', 'Weekly working hours', <ProviderAvailability />)} />
+      <Route path="/provider/profile" element={providerLayout('Provider Profile', 'Public identity & contact details', <ProviderProfile />)} />
+
       {/* ----- Admin dashboard ----- */}
       <Route path="/admin" element={adminLayout('Admin Overview', 'Business summary', <AdminOverview />)} />
       <Route path="/admin/appointments" element={adminLayout('Appointments', 'Approve, reject & update statuses', <AdminAppointments />)} />
       <Route path="/admin/services" element={adminLayout('Services', 'Add, edit & delete services', <AdminServices />)} />
       <Route path="/admin/categories" element={adminLayout('Categories', 'Organize services by category', <AdminCategories />)} />
       <Route path="/admin/providers" element={adminLayout('Providers', 'Manage specialists & staff', <AdminProviders />)} />
+      <Route path="/admin/approvals" element={adminLayout('Approvals', 'Review provider accounts & services', <AdminApprovals />)} />
       <Route path="/admin/working-hours" element={adminLayout('Working Hours', 'Provider schedules', <AdminWorkingHours />)} />
       <Route path="/admin/customers" element={adminLayout('Customers', 'Your client list', <AdminCustomers />)} />
       <Route path="/admin/customers/:id" element={adminLayout('Customer Details', 'Profile & appointment history', <AdminCustomerDetails />)} />

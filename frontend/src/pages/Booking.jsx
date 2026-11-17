@@ -472,6 +472,7 @@ export default function Booking() {
     ? {
         service: confirmed.service?.name || confirmed.serviceName || selectedService?.name,
         specialist: confirmed.specialist?.name || confirmed.specialistName || selectedSpecialist?.name,
+        provider: confirmed.providerName || selectedService?.providerName || '',
         date: confirmed.date || date,
         time: confirmed.time || time,
         reference: confirmed.reference || confirmed.id,
@@ -680,6 +681,11 @@ export default function Booking() {
                                 <span className="mt-0.5 block truncate text-sm font-bold text-ink">
                                   {service.name}
                                 </span>
+                                {service.providerName ? (
+                                  <span className="mt-0.5 block truncate text-[11px] font-medium text-ink-soft">
+                                    by {service.providerName}
+                                  </span>
+                                ) : null}
                                 <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-soft">
                                   <span className="font-bold text-teal-deep">
                                     {service.price || '—'}
@@ -727,6 +733,7 @@ export default function Booking() {
                         <span className="min-w-0 truncate text-xs font-semibold text-teal-deep">
                           {selectedService.name} · {selectedService.duration || '—'} min ·{' '}
                           {selectedService.price}
+                          {selectedService.providerName ? ` · ${selectedService.providerName}` : ''}
                         </span>
                         <button
                           type="button"
@@ -1410,6 +1417,12 @@ export default function Booking() {
         </div>
 
         <dl className="mt-4 divide-y divide-line rounded-2xl border border-line text-sm">
+          {detailSummary?.provider ? (
+            <div className="flex items-start justify-between gap-3 px-4 py-3">
+              <dt className="text-ink-soft">Provider</dt>
+              <dd className="text-right font-semibold text-ink">{detailSummary.provider}</dd>
+            </div>
+          ) : null}
           <div className="flex items-start justify-between gap-3 px-4 py-3">
             <dt className="text-ink-soft">Service</dt>
             <dd className="text-right font-semibold text-ink">{detailSummary?.service || '—'}</dd>
