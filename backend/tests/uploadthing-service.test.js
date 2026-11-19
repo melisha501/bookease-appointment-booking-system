@@ -1,6 +1,6 @@
 // Upload service tests (no network, no real credentials).
-// Verifies validation, safe configuration handling, the UploadThing-only upload
-// path, legacy SECRET + APP_ID support, and provider failure handling.
+// Verifies validation, safe configuration handling, v7-token-only uploads,
+// and correct classification of configuration vs provider failures.
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -85,10 +85,9 @@ function file(overrides = {}) {
   };
 }
 
-function legacyToken(secret, appId, region = "sea1") {
-  return Buffer.from(JSON.stringify({ apiKey: secret, appId, regions: [region] }), "utf8").toString(
-    "base64"
-  );
+// Shape-only fixture matching the v7 SDK schema. Not a real credential.
+function v7Token(apiKey = "sk_test_key", appId = "ut_app_test", regions = ["sea1"]) {
+  return Buffer.from(JSON.stringify({ apiKey, appId, regions }), "utf8").toString("base64");
 }
 
 test("validateImageFile rejects missing file, bad type, bad image data, and large size", () => {
@@ -115,7 +114,7 @@ test("validateImageFile rejects missing file, bad type, bad image data, and larg
   }
 });
 
-test("uploadImageToUploadThing returns 503 when no credentials are configured", async () => {
+test("uploadImageToUploadThing returns 503 when UPLOADTHING_TOKEN is missing", async () => {
   class UTFileMock {}
   class UTApiMock {
     async uploadFiles() {
@@ -127,14 +126,86 @@ test("uploadImageToUploadThing returns 503 when no credentials are configured", 
     const result = await svc.uploadImageToUploadThing(file());
     assert.equal(result.ok, false);
     assert.equal(result.status, 503);
-    assert.match(result.message, /UPLOADTHING_SECRET/i);
-    assert.match(result.message, /UPLOADTHING_APP_ID/i);
+    assert.match(result.message, /UPLOADTHING_TOKEN/i);
+    assert.match(result.message, /V7/i);
   } finally {
     svc.restore();
   }
 });
 
-test("legacy SECRET + APP_ID are combined into a v7 token and used for uploads", async () => {
+test("legacy v6 SECRET + APP_ID are ignored and never converted into a v7 token", async () => {
+  let called = false;
+  class UTFileMock {}
+  class UTApiMock {
+    async uploadFiles() {
+      called = true;
+      return { data: { ufsUrl: "https://app.ufs.sh/f/test-key.png" } };
+    }
+  }
+  const svc = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
+    env: {
+      UPLOADTHING_SECRET: "ut_secret_test",
+      UPLOADTHING_APP_ID: "ut_app_test",
+      UPLOADTHING_REGION: "lhr1",
+    },
+  });
+  try {
+    const result = await svc.uploadImageToUploadThing(file());
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 503);
+    assert.equal(called, false);
+    assert.doesNotMatch(result.message, /ut_secret_test/);
+  } finally {
+    svc.restore();
+  }
+});
+
+test("an invalid v7 token is a 503 configuration error and never reaches the SDK", async () => {
+  let called = false;
+  class UTFileMock {}
+  class UTApiMock {
+    constructor(opts) {
+      assert.equal(opts.token, undefined);
+    }
+    async uploadFiles() {
+      called = true;
+      return { data: { ufsUrl: "https://app.ufs.sh/f/test-key.png" } };
+    }
+  }
+
+  // Raw v6 secret accidentally placed in UPLOADTHING_TOKEN.
+  const rawSecret = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
+    env: { UPLOADTHING_TOKEN: "sk_live_old_v6_secret" },
+  });
+  try {
+    const result = await rawSecret.uploadImageToUploadThing(file());
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 503);
+    assert.match(result.message, /v7 token/i);
+    assert.equal(called, false);
+  } finally {
+    rawSecret.restore();
+  }
+
+  // Base64 JSON with an apiKey that does not match the v7 SDK schema.
+  const badShape = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
+    env: { UPLOADTHING_TOKEN: v7Token("re_not_an_uploadthing_key", "ut_app_test", []) },
+  });
+  try {
+    const result = await badShape.uploadImageToUploadThing(file());
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 503);
+    assert.match(result.message, /v7 token/i);
+    assert.equal(called, false);
+  } finally {
+    badShape.restore();
+  }
+});
+
+test("a valid v7 token is used verbatim for uploads", async () => {
   let seen;
   class UTFileMock {
     constructor(parts, name, opts) {
@@ -156,13 +227,10 @@ test("legacy SECRET + APP_ID are combined into a v7 token and used for uploads",
     }
   }
 
+  const token = v7Token("sk_test_key", "ut_app_test", ["lhr1"]);
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
-    env: {
-      UPLOADTHING_SECRET: "ut_secret_test",
-      UPLOADTHING_APP_ID: "ut_app_test",
-      UPLOADTHING_REGION: "lhr1",
-    },
+    env: { UPLOADTHING_TOKEN: token },
   });
   try {
     const result = await svc.uploadImageToUploadThing(
@@ -172,13 +240,9 @@ test("legacy SECRET + APP_ID are combined into a v7 token and used for uploads",
     assert.equal(result.url, "https://app.ufs.sh/f/test-key.png");
     assert.equal(result.key, "test-key");
     assert.equal(result.storage, "uploadthing");
+    assert.equal(seen.token, token);
     assert.equal(seen.f.name, "my-photo.webp");
     assert.equal(seen.f.type, "image/webp");
-
-    const decoded = JSON.parse(Buffer.from(seen.token, "base64").toString("utf8"));
-    assert.equal(decoded.apiKey, "ut_secret_test");
-    assert.equal(decoded.appId, "ut_app_test");
-    assert.deepEqual(decoded.regions, ["lhr1"]);
   } finally {
     svc.restore();
   }
@@ -202,7 +266,7 @@ test("UPLOADTHING_TOKEN is used directly and returns the uploaded URL", async ()
     }
   }
 
-  const token = legacyToken("ut_direct_key", "ut_direct_app");
+  const token = v7Token("sk_test_direct_key", "ut_direct_app");
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
     env: { UPLOADTHING_TOKEN: token },
@@ -230,7 +294,7 @@ test("uploadImageToUploadThing handles provider errors safely", async () => {
   }
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
-    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+    env: { UPLOADTHING_TOKEN: v7Token() },
   });
   try {
     const result = await svc.uploadImageToUploadThing(file());
@@ -251,7 +315,7 @@ test("uploadImageToUploadThing hides thrown provider errors and never returns a 
   }
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
-    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+    env: { UPLOADTHING_TOKEN: v7Token() },
   });
   try {
     const result = await svc.uploadImageToUploadThing(file());
@@ -265,19 +329,49 @@ test("uploadImageToUploadThing hides thrown provider errors and never returns a 
   }
 });
 
-test("getUploadThingConfig reports configuration sources without exposing the token", () => {
+test("getUploadThingConfig reports v7 token status without exposing the token", () => {
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: class {}, UTFile: class {} },
-    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+    env: { UPLOADTHING_TOKEN: v7Token("sk_test_key", "ut_app_test", ["lhr1"]) },
   });
   try {
     const config = svc.getUploadThingConfig();
     assert.equal(config.configured, true);
+    assert.equal(config.tokenValid, true);
     assert.equal(config.enabled, true);
-    assert.equal(config.source, "legacy");
+    assert.equal(config.source, "token");
     assert.equal(config.appId, "ut_app_test");
+    assert.equal(config.region, "lhr1");
     assert.ok(config.token);
     assert.equal(Object.prototype.hasOwnProperty.call(config, "apiKey"), false);
+  } finally {
+    svc.restore();
+  }
+});
+
+test("SDK configuration errors are reported as 503 instead of 502", async () => {
+  class UTFileMock {}
+  class UTApiMock {
+    async uploadFiles() {
+      return {
+        data: null,
+        error: {
+          code: "INVALID_SERVER_CONFIG",
+          message:
+            "Invalid token. A token is a base64 encoded JSON object matching { apiKey: string, appId: string, regions: string[] }.",
+        },
+      };
+    }
+  }
+  const svc = loadUploadService({
+    uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
+    env: { UPLOADTHING_TOKEN: v7Token() },
+  });
+  try {
+    const result = await svc.uploadImageToUploadThing(file());
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 503);
+    assert.match(result.message, /v7 token/i);
   } finally {
     svc.restore();
   }
@@ -322,7 +416,7 @@ test("deleteImageFromUploadThing returns 503 when credentials are missing", asyn
     const result = await svc.deleteImageFromUploadThing("https://utfs.io/f/test-key.png");
     assert.equal(result.ok, false);
     assert.equal(result.status, 503);
-    assert.match(result.message, /UPLOADTHING_SECRET/i);
+    assert.match(result.message, /UPLOADTHING_TOKEN/i);
   } finally {
     svc.restore();
   }
@@ -339,7 +433,7 @@ test("deleteImageFromUploadThing deletes only the extracted key via UTApi", asyn
       return { success: true, deletedCount: 1 };
     }
   }
-  const token = legacyToken("ut_secret_test", "ut_app_test");
+  const token = v7Token();
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: class {} },
     env: { UPLOADTHING_TOKEN: token },
@@ -368,7 +462,7 @@ test("deleteImageFromUploadThing skips external and missing URLs without calling
   }
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: class {} },
-    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+    env: { UPLOADTHING_TOKEN: v7Token() },
   });
   try {
     const external = await svc.deleteImageFromUploadThing("https://images.unsplash.com/photo-123");
@@ -400,7 +494,7 @@ test("deleteImageFromUploadThing reports already-missing files honestly", async 
   }
   const svc = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: class {} },
-    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+    env: { UPLOADTHING_TOKEN: v7Token() },
   });
   try {
     const result = await svc.deleteImageFromUploadThing("https://utfs.io/f/already-gone.png");
@@ -421,7 +515,7 @@ test("deleteImageFromUploadThing handles provider refusal and thrown errors safe
   }
   const refused = loadUploadService({
     uploadthingServerModule: { UTApi: RefusingUTApi, UTFile: class {} },
-    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+    env: { UPLOADTHING_TOKEN: v7Token() },
   });
   try {
     const result = await refused.deleteImageFromUploadThing("https://utfs.io/f/test-key.png");
@@ -439,7 +533,7 @@ test("deleteImageFromUploadThing handles provider refusal and thrown errors safe
   }
   const thrown = loadUploadService({
     uploadthingServerModule: { UTApi: ThrowingUTApi, UTFile: class {} },
-    env: { UPLOADTHING_SECRET: "ut_secret_test", UPLOADTHING_APP_ID: "ut_app_test" },
+    env: { UPLOADTHING_TOKEN: v7Token() },
   });
   try {
     const result = await thrown.deleteImageFromUploadThing("https://utfs.io/f/test-key.png");

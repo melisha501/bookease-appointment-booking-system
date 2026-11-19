@@ -56,12 +56,15 @@ export default function ProviderServices() {
   const [editing, setEditing] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [imageProgress, setImageProgress] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [busyId, setBusyId] = useState('');
   const noteTimerRef = useRef(null);
+  const saveGuardRef = useRef(false);
+  const uploadGuardRef = useRef(false);
 
   useEffect(
     () => () => {
@@ -73,7 +76,11 @@ export default function ProviderServices() {
   const flash = (message, type = 'success') => {
     if (noteTimerRef.current) window.clearTimeout(noteTimerRef.current);
     setStatus({ type, message });
-    noteTimerRef.current = window.setTimeout(() => setStatus({ type: '', message: '' }), 6000);
+    // Errors stay visible until the provider acts on them (e.g. retries an
+    // upload), so a failed upload is never mistaken for a successful one.
+    if (type !== 'error') {
+      noteTimerRef.current = window.setTimeout(() => setStatus({ type: '', message: '' }), 6000);
+    }
   };
 
   const resolveCategoryId = useCallback(
@@ -116,6 +123,21 @@ export default function ProviderServices() {
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
+  // Always derive the form from the server record. This keeps the persisted
+  // image URL intact when only other service fields are edited.
+  const formFromService = (service, imageOverride) => ({
+    id: service.id,
+    name: service.name || '',
+    description: service.description || '',
+    categoryId: resolveCategoryId(service),
+    price: String(service.priceNpr ?? ''),
+    duration: service.duration ?? 60,
+    benefits: Array.isArray(service.benefits) ? service.benefits.join('\n') : '',
+    image: imageOverride ?? service.image ?? '',
+    isActive: service.isActive !== false,
+    approvalStatus: service.approvalStatus || 'pending',
+  });
+
   const resetForm = () => {
     setForm(EMPTY_FORM);
     setEditing(false);
@@ -124,18 +146,7 @@ export default function ProviderServices() {
   };
 
   const handleEdit = (service) => {
-    setForm({
-      id: service.id,
-      name: service.name || '',
-      description: service.description || '',
-      categoryId: resolveCategoryId(service),
-      price: String(service.priceNpr ?? ''),
-      duration: service.duration ?? 60,
-      benefits: Array.isArray(service.benefits) ? service.benefits.join('\n') : '',
-      image: service.image || '',
-      isActive: service.isActive !== false,
-      approvalStatus: service.approvalStatus || 'pending',
-    });
+    setForm(formFromService(service));
     setEditing(true);
     setImageFile(null);
     setImageProgress(0);
@@ -154,12 +165,16 @@ export default function ProviderServices() {
 
   const handleSave = async (event) => {
     event.preventDefault();
+    // Refs guard against rapid double-clicks/Enter before React re-renders the
+    // disabled buttons. Only one save or upload may be in flight at a time.
+    if (saveGuardRef.current || uploadGuardRef.current) return;
     const validation = validate();
     if (validation) {
       setStatus({ type: 'error', message: validation });
       return;
     }
 
+    saveGuardRef.current = true;
     setSaving(true);
     setImageProgress(0);
     setStatus({ type: 'loading', message: editing ? 'Saving service…' : 'Creating service…' });
@@ -183,9 +198,22 @@ export default function ProviderServices() {
       saved = data?.service || null;
       if (!saved?.id) throw new Error('The service was saved but the server response was incomplete.');
 
-      let finalImage = saved.image || '';
+      // Switch into edit mode immediately. If the image upload fails below, the
+      // provider can retry against this exact service instead of creating it again.
+      const formValues = formFromService(saved, saved.image || form.image);
+      setServices((current) => {
+        const exists = current.some((item) => item.id === saved.id);
+        return exists
+          ? current.map((item) => (item.id === saved.id ? saved : item))
+          : [saved, ...current];
+      });
+      setForm(formValues);
+      setEditing(true);
+
       let warning = '';
       if (imageFile) {
+        setUploading(true);
+        uploadGuardRef.current = true;
         setStatus({ type: 'loading', message: 'Uploading service image…' });
         const fd = new FormData();
         fd.append('image', imageFile);
@@ -195,30 +223,13 @@ export default function ProviderServices() {
           setImageProgress
         );
         saved = uploaded?.service || saved;
-        finalImage = uploaded?.service?.image || finalImage;
         warning = uploaded?.warning || '';
+        setServices((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+        setForm(formFromService(saved, saved.image || formValues.image));
+        // Clear the selection only after the server confirms the new URL.
         setImageFile(null);
       }
 
-      setServices((current) => {
-        const exists = current.some((item) => item.id === saved.id);
-        return exists
-          ? current.map((item) => (item.id === saved.id ? saved : item))
-          : [saved, ...current];
-      });
-      setForm({
-        id: saved.id,
-        name: saved.name || '',
-        description: saved.description || '',
-        categoryId: resolveCategoryId(saved),
-        price: String(saved.priceNpr ?? ''),
-        duration: saved.duration ?? 60,
-        benefits: Array.isArray(saved.benefits) ? saved.benefits.join('\n') : '',
-        image: finalImage,
-        isActive: saved.isActive !== false,
-        approvalStatus: saved.approvalStatus || 'pending',
-      });
-      setEditing(true);
       setImageProgress(0);
       if (typeof refreshCatalog === 'function') refreshCatalog().catch(() => {});
       flash(
@@ -237,21 +248,28 @@ export default function ProviderServices() {
             ? current.map((item) => (item.id === saved.id ? saved : item))
             : [saved, ...current];
         });
+        // Keep the existing URL in the form and keep the selected file so the
+        // provider can press "Upload image" again without recreating the service.
+        setForm(formFromService(saved, saved.image || form.image));
         setEditing(true);
-        setStatus({
-          type: 'error',
-          message: `Service was saved, but the image upload failed: ${err?.message || 'Unknown error'}. Try uploading the image again.`,
-        });
-        if (typeof refreshCatalog === 'function') refreshCatalog().catch(() => {});
+        flash(
+          `Service was saved, but the image upload failed: ${err?.message || 'Unknown error'}. Your image selection is kept — press “Upload image” to retry.`,
+          'error'
+        );
       } else {
-        setStatus({ type: 'error', message: err?.message || 'Could not save the service.' });
+        flash(err?.message || 'Could not save the service.', 'error');
       }
+      if (typeof refreshCatalog === 'function' && saved?.id) refreshCatalog().catch(() => {});
     } finally {
+      saveGuardRef.current = false;
+      uploadGuardRef.current = false;
       setSaving(false);
+      setUploading(false);
     }
   };
 
   const handleUploadImage = async () => {
+    if (uploadGuardRef.current || saveGuardRef.current) return;
     if (!editing || !form.id) {
       setStatus({ type: 'error', message: 'Save the service first, then upload an image.' });
       return;
@@ -260,7 +278,8 @@ export default function ProviderServices() {
       setStatus({ type: 'error', message: 'Choose an image file first.' });
       return;
     }
-    setSaving(true);
+    uploadGuardRef.current = true;
+    setUploading(true);
     setImageProgress(0);
     setStatus({ type: 'loading', message: 'Uploading service image…' });
     try {
@@ -272,17 +291,26 @@ export default function ProviderServices() {
         setImageProgress
       );
       const updated = data?.service;
+      const finalImage = updated?.image || form.image || '';
       if (updated) {
         setServices((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-        setForm((current) => ({ ...current, image: updated.image || '' }));
+        setForm((current) => ({ ...current, image: finalImage }));
       }
+      // Clear the selection only after a real success response.
       setImageFile(null);
       if (typeof refreshCatalog === 'function') refreshCatalog().catch(() => {});
-      flash(data?.warning || 'Service image uploaded.', data?.warning ? 'warning' : 'success');
+      flash(
+        data?.warning || 'Service image uploaded and saved.',
+        data?.warning ? 'warning' : 'success'
+      );
     } catch (err) {
-      setStatus({ type: 'error', message: err?.message || 'Could not upload the image.' });
+      flash(
+        `Could not upload the image: ${err?.message || 'Unknown error'}. Your selection is kept — press “Upload image” to retry.`,
+        'error'
+      );
     } finally {
-      setSaving(false);
+      uploadGuardRef.current = false;
+      setUploading(false);
       setImageProgress(0);
     }
   };
@@ -691,8 +719,9 @@ export default function ProviderServices() {
               onUpload={handleUploadImage}
               onRemove={handleRemoveImage}
               canUpload={editing && Boolean(form.id)}
-              busy={saving}
-              progress={imageProgress}
+              busy={saving || uploading}
+              busyLabel={uploading ? 'Uploading…' : undefined}
+              progress={uploading ? imageProgress : null}
               status={status}
               uploadLabel="Upload image"
               removeLabel="Remove image"

@@ -27,6 +27,7 @@ export default function ImageUploadField({
   onRemove,
   canUpload = true,
   busy = false,
+  busyLabel = 'Working…',
   progress = null,
   status = { type: '', message: '' },
   uploadLabel = 'Upload Image',
@@ -155,7 +156,7 @@ export default function ImageUploadField({
         {busy ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-teal-deep ring-1 ring-line">
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            Working…
+            {busyLabel}
           </span>
         ) : null}
       </div>
@@ -229,7 +230,7 @@ export default function ImageUploadField({
           title={canUpload ? 'Upload the selected image' : 'Save the record first, then upload an image.'}
         >
           {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          {busy ? 'Working…' : uploadLabel}
+          {busy ? busyLabel : uploadLabel}
         </Button>
 
         {file ? (

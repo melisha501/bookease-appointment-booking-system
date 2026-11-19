@@ -23,15 +23,17 @@ const MIME_BY_EXT = {
 };
 
 function printConfig(config) {
-  console.log("UploadThing configuration");
-  console.log("-------------------------");
+  console.log("UploadThing configuration (v7)");
+  console.log("------------------------------");
   console.log(`  credential source : ${config.source}`);
-  console.log(`  configured        : ${config.configured ? "yes" : "no"}`);
+  console.log(`  token present     : ${config.configured ? "yes" : "no"}`);
+  console.log(`  token shape       : ${config.tokenValid ? "valid" : "invalid"}`);
   console.log(`  server SDK        : ${config.sdkAvailable ? "available" : "missing"}`);
   console.log(`  uploads enabled   : ${config.enabled ? "yes" : "no"}`);
   console.log(`  app id            : ${config.appId || "(not set)"}`);
-  console.log(`  region            : ${config.region}`);
+  console.log(`  region            : ${config.region || "(not set)"}`);
   console.log(`  max image size    : ${Math.round(config.maxBytes / (1024 * 1024))} MB`);
+  if (!config.enabled) console.log(`  issue             : ${config.error}`);
 }
 
 async function main() {
@@ -40,8 +42,9 @@ async function main() {
 
   if (!config.enabled) {
     console.error(
-      "\nUploads are not enabled. Add UPLOADTHING_SECRET + UPLOADTHING_APP_ID " +
-        "(or UPLOADTHING_TOKEN) to backend/.env, then run this command again."
+      "\nUploads are not enabled. Set UPLOADTHING_TOKEN to the V7 token from the UploadThing " +
+        "dashboard (API Keys -> V7) in the backend environment, then restart/redeploy and run " +
+        "this command again. Legacy v6 secrets are not accepted."
     );
     process.exitCode = 1;
     return;

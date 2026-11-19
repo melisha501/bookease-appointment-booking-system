@@ -6,13 +6,15 @@
 // replaced, removed, or its owning record is deleted, the old file is removed
 // from UploadThing too (unless another record still references the same URL).
 //
-// Configuration (backend/.env):
-// - UPLOADTHING_TOKEN: preferred for uploadthing v7. A base64-encoded JSON
-//   token from the UploadThing dashboard.
-// - UPLOADTHING_SECRET + UPLOADTHING_APP_ID: legacy credentials. They are
-//   combined into the v7 token format automatically when UPLOADTHING_TOKEN is
-//   not set.
-// - UPLOADTHING_REGION: optional region for the legacy pair (default "sea1").
+// Configuration (backend environment variables):
+// - UPLOADTHING_TOKEN: the token from UploadThing Dashboard -> API Keys -> V7.
+//   UploadThing v7 expects the complete base64-encoded JSON token with
+//   { apiKey, appId, regions }. It is read verbatim and never reconstructed.
+//
+// Legacy v6 secrets (UPLOADTHING_SECRET / UPLOADTHING_APP_ID) are deliberately
+// NOT supported: an old secret is not a v7 token and must not be passed to the
+// SDK. A missing/invalid token is a configuration problem (503), never a 502
+// upload failure.
 //
 // There is intentionally NO local-disk fallback. If UploadThing is not
 // configured, uploads fail with a clear 503 response instead of silently
@@ -32,13 +34,20 @@ try {
 const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const DEFAULT_MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB
 const EXT_BY_MIME = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp" };
-const DEFAULT_REGION = "sea1";
+
+const TOKEN_SETUP_MESSAGE =
+  "Set UPLOADTHING_TOKEN in the backend environment to the token from UploadThing Dashboard -> API Keys -> V7, then restart/redeploy the backend.";
+const INVALID_TOKEN_MESSAGE =
+  "UPLOADTHING_TOKEN is not a valid UploadThing v7 token. Copy the complete token from UploadThing Dashboard -> API Keys -> V7 (do not use a v6 secret), then restart/redeploy the backend.";
+const CONFIG_ERROR_CODES = new Set(["INVALID_SERVER_CONFIG", "MISSING_ENV"]);
 
 function trimmedEnv(name) {
   const value = process.env[name];
   return value == null ? "" : String(value).trim();
 }
 
+// Validates the token shape required by uploadthing v7's own config schema:
+// base64(JSON({ apiKey: "sk_...", appId: string, regions: [string, ...] })).
 function decodeToken(token) {
   if (!token) return null;
   try {
@@ -47,11 +56,12 @@ function decodeToken(token) {
     if (
       parsed &&
       typeof parsed.apiKey === "string" &&
-      parsed.apiKey &&
+      parsed.apiKey.startsWith("sk_") &&
       typeof parsed.appId === "string" &&
-      parsed.appId &&
+      parsed.appId.trim() &&
       Array.isArray(parsed.regions) &&
-      parsed.regions.length > 0
+      parsed.regions.length > 0 &&
+      parsed.regions.every((region) => typeof region === "string" && region.trim())
     ) {
       return parsed;
     }
@@ -61,43 +71,37 @@ function decodeToken(token) {
   return null;
 }
 
-function buildLegacyToken(secret, appId, region) {
-  if (!secret || !appId) return "";
-  const payload = {
-    apiKey: secret,
-    appId,
-    regions: [region || DEFAULT_REGION],
-  };
-  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+function isUploadThingConfigError(err) {
+  if (!err) return false;
+  if (CONFIG_ERROR_CODES.has(err.code)) return true;
+  const message = String(err.message || "");
+  return /invalid token|missing token|invalid_server_config|missing_env/i.test(message);
 }
 
 function getUploadThingConfig() {
-  const explicitToken = trimmedEnv("UPLOADTHING_TOKEN");
-  const secret = trimmedEnv("UPLOADTHING_SECRET");
-  const appId = trimmedEnv("UPLOADTHING_APP_ID");
-  const region = trimmedEnv("UPLOADTHING_REGION") || DEFAULT_REGION;
-
-  let token = explicitToken;
-  let source = explicitToken ? "token" : "none";
-
-  if (!token && secret && appId) {
-    token = buildLegacyToken(secret, appId, region);
-    source = "legacy";
-  }
-
+  // Exactly one source of truth: the v7 token issued by UploadThing. Legacy
+  // v6 variables are intentionally ignored so an old secret can never be used
+  // as a v7 token.
+  const token = trimmedEnv("UPLOADTHING_TOKEN");
   const decoded = decodeToken(token);
   const sdkAvailable = Boolean(UTApi && UTFile);
   const configured = Boolean(token);
 
+  let error = "";
+  if (!configured) error = TOKEN_SETUP_MESSAGE;
+  else if (!decoded) error = INVALID_TOKEN_MESSAGE;
+  else if (!sdkAvailable) error = "The UploadThing server SDK is not available. Run npm install in the backend.";
+
   return {
     token,
-    source,
+    source: configured ? "token" : "none",
     configured,
     tokenValid: Boolean(decoded),
     enabled: Boolean(configured && decoded && sdkAvailable),
     sdkAvailable,
-    appId: decoded?.appId || appId || null,
-    region,
+    error,
+    appId: decoded?.appId || null,
+    region: decoded?.regions?.[0] || null,
     maxBytes: DEFAULT_MAX_IMAGE_BYTES,
     allowedMimeTypes: ALLOWED_IMAGE_MIME_TYPES,
   };
@@ -316,35 +320,13 @@ async function deleteImageFromUploadThing(imageUrl) {
   }
 
   const config = getUploadThingConfig();
-  if (!config.configured) {
+  if (!config.enabled) {
     return {
       ok: false,
       status: 503,
       deleted: false,
       key: parsed.key,
-      message:
-        "Image deletion is not configured. Set UPLOADTHING_SECRET and UPLOADTHING_APP_ID " +
-        "(or UPLOADTHING_TOKEN) in backend/.env, then restart the backend.",
-    };
-  }
-  if (!UTApi) {
-    return {
-      ok: false,
-      status: 503,
-      deleted: false,
-      key: parsed.key,
-      message: "The UploadThing server SDK is not available. Run npm install in the backend.",
-    };
-  }
-  if (!config.tokenValid) {
-    return {
-      ok: false,
-      status: 503,
-      deleted: false,
-      key: parsed.key,
-      message:
-        "UploadThing configuration is invalid, so the cloud file was not deleted. " +
-        "Check the UploadThing credentials in backend/.env.",
+      message: `Image deletion is unavailable: ${config.error}`,
     };
   }
 
@@ -384,6 +366,9 @@ async function deleteImageFromUploadThing(imageUrl) {
       "[upload] UploadThing delete failed:",
       (err && (err.code || err.name)) || "Unknown error"
     );
+    if (isUploadThingConfigError(err)) {
+      return { ok: false, status: 503, deleted: false, key: parsed.key, message: INVALID_TOKEN_MESSAGE };
+    }
     return {
       ok: false,
       status: 502,
@@ -415,32 +400,10 @@ async function uploadImage(file) {
 
   const config = getUploadThingConfig();
 
-  if (!config.configured) {
-    return {
-      ok: false,
-      status: 503,
-      message:
-        "Image uploads are not configured. Set UPLOADTHING_SECRET and UPLOADTHING_APP_ID " +
-        "(or UPLOADTHING_TOKEN) in backend/.env, then restart the backend.",
-    };
-  }
-
-  if (!config.sdkAvailable) {
-    return {
-      ok: false,
-      status: 503,
-      message: "The UploadThing server SDK is not available. Run npm install in the backend.",
-    };
-  }
-
   if (!config.enabled) {
-    return {
-      ok: false,
-      status: 503,
-      message:
-        "UploadThing configuration is invalid. Check UPLOADTHING_SECRET and UPLOADTHING_APP_ID " +
-        "(or UPLOADTHING_TOKEN) in backend/.env.",
-    };
+    // Missing/invalid v7 token and a missing SDK are backend configuration
+    // problems. They must never be reported as a failed upload (502).
+    return { ok: false, status: 503, message: `Image uploads are unavailable: ${config.error}` };
   }
 
   try {
@@ -450,6 +413,9 @@ async function uploadImage(file) {
     const item = Array.isArray(result) ? result[0] : result;
 
     if (item && item.error) {
+      if (isUploadThingConfigError(item.error)) {
+        return { ok: false, status: 503, message: `Image uploads are unavailable: ${INVALID_TOKEN_MESSAGE}` };
+      }
       const msg = item.error.message || item.error.code || "Image upload failed.";
       return { ok: false, status: 502, message: `Image upload failed: ${msg}` };
     }
@@ -472,10 +438,17 @@ async function uploadImage(file) {
       "[upload] UploadThing upload failed:",
       (err && (err.code || err.name)) || "Unknown error"
     );
+    if (isUploadThingConfigError(err)) {
+      return {
+        ok: false,
+        status: 503,
+        message: `Image uploads are unavailable: ${INVALID_TOKEN_MESSAGE}`,
+      };
+    }
     return {
       ok: false,
       status: 502,
-      message: "Image upload failed. Please check the UploadThing configuration and try again.",
+      message: "Image upload failed. Please try again.",
     };
   }
 }
@@ -489,6 +462,7 @@ module.exports = {
   ALLOWED_IMAGE_MIME_TYPES,
   DEFAULT_MAX_IMAGE_BYTES,
   getUploadThingConfig,
+  isUploadThingConfigError,
   imageUploadMiddleware,
   validateImageFile,
   uploadImage,

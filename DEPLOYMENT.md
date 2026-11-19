@@ -250,7 +250,7 @@ The repository includes `render.yaml`.
 | `RESEND_API_KEY` | Your Resend key |
 | `RESEND_FROM_EMAIL` | Verified sender, e.g. `BookEase <no-reply@yourdomain.com>` (required in production) |
 | `ADMIN_NOTIFICATION_EMAIL` | Admin inbox(es) |
-| `UPLOADTHING_TOKEN` | UploadThing token |
+| `UPLOADTHING_TOKEN` | Complete V7 token from UploadThing Dashboard → API Keys → V7 (backend only) |
 
 6. Apply the Blueprint.
 
@@ -441,18 +441,20 @@ Test mode note: `onboarding@resend.dev` only delivers to the Resend account owne
 ## 7. Configure UploadThing (production images)
 
 1. Sign in to [UploadThing](https://uploadthing.com/dashboard).
-2. Create an app.
-3. Copy the v7 token.
-4. Set in Render:
+2. Create/select an app.
+3. Open **API Keys → V7** and copy the complete token (it is a base64-encoded JSON
+   object with `apiKey`, `appId`, and `regions`). Do **not** use a v6 secret.
+4. In Render → Backend Web Service → Environment, set:
 
 ```text
-UPLOADTHING_TOKEN=...
+UPLOADTHING_TOKEN=<the complete V7 token>
 ```
 
-5. Redeploy the backend.
-6. Log in as admin → **Services** → upload an image.
-7. Confirm the image appears on the public service page and survives a refresh.
-8. Repeat for **Providers**.
+   Set it only on Render. Never add it to Vercel/frontend variables or commit it.
+5. Redeploy the backend (Render does not pick up local `.env` changes automatically).
+6. Log in as a provider → **My Services** → **Edit Service** → **Service image** → upload an image.
+7. Confirm the image appears in the service list and survives a refresh.
+8. Repeat for admin services/providers if those flows are used.
 
 Diagnostics from the Render Shell:
 
@@ -460,7 +462,9 @@ Diagnostics from the Render Shell:
 npm run uploadthing:check
 ```
 
-The command prints the credential source and whether uploads are enabled, but never prints the token.
+This prints the token source, token shape, app id, region, and whether uploads are
+enabled, but never prints the token itself. `token shape: valid` and
+`uploads enabled: yes` confirm the deployed backend reads a usable V7 token.
 
 ---
 
@@ -550,8 +554,8 @@ Do not report the deployment as successful until these pass.
 | Email rows are `failed` | Unverified sender, invalid API key/recipient, or retries exhausted | Fix Resend configuration, then enqueue a new event; failed rows are not resent automatically. |
 | Replaced image still loads | UploadThing CDN cache; the provider confirmed the delete | URL invalidation is not immediate. Keep the new URL in the database and treat the old file as revoked at the API level. |
 | Emails not arriving | Missing/invalid Resend key, unverified sender, test-mode recipient | Check Render logs, verify the domain, use an allowed recipient. |
-| Image upload returns `503` | UploadThing not configured | Set `UPLOADTHING_TOKEN` in Render and redeploy. |
-| Image upload returns `502` | UploadThing rejected the request | Check file type/size (JPG/PNG/WEBP, max 4 MB) and UploadThing dashboard logs. |
+| Image upload returns `503` | Missing/invalid `UPLOADTHING_TOKEN` (or SDK not installed) | Set the complete V7 token in Render, redeploy, and run `npm run uploadthing:check` in Render Shell. |
+| Image upload returns `502` | UploadThing rejected the upload itself | Check file type/size (JPG/PNG/WEBP, max 4 MB) and UploadThing dashboard logs. A bad token is now a `503`, never a `502`. |
 | Refreshing a React route returns 404 | SPA rewrite missing | Confirm `frontend/vercel.json` is deployed with the frontend. |
 | Vercel build fails | Wrong root directory or Node version | Set root directory `frontend`; use Node 20/22. |
 | Admin login works locally but not in production | Production database was not seeded | Run `npm run db:seed` against production, then change the password. |
