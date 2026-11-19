@@ -5,6 +5,7 @@
 import { LogOut, Menu } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useDemo } from '../store/DemoContext';
+import { loginForRole } from '../utils/authRoutes';
 
 function initials(name) {
   return String(name || 'U')
@@ -28,8 +29,9 @@ export default function Topbar({
   const displayName = userName || user?.name || 'User';
 
   const handleLogout = async () => {
+    const loginTo = loginForRole(user?.role);
     await logout();
-    navigate('/login');
+    navigate(loginTo, { replace: true });
   };
 
   return (

@@ -41,6 +41,7 @@ const prismaMock = {
   },
   specialist: { count: async () => 2 },
   service: { count: async () => 3 },
+  provider: { count: async () => 4 },
   appointment: {
     groupBy: async () => [{ status: "confirmed", _count: { _all: 1 } }],
     findMany: async (args) => {
@@ -118,6 +119,9 @@ test("dashboard statistics endpoint is restricted to authenticated administrator
   assert.equal(body.success, true);
   assert.equal(body.stats.totalCustomers, 1);
   assert.equal(body.stats.totalProviders, 2);
+  assert.equal(body.stats.providerAccounts, 4);
+  assert.equal(body.stats.pendingProviderAccounts, 4);
+  assert.equal(body.stats.pendingServiceApprovals, 3);
   assert.equal(body.stats.totalServices, 3);
   assert.equal(body.stats.totalAppointments, 1);
   assert.equal(body.stats.confirmedAppointments, 1);

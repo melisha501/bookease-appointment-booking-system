@@ -3,6 +3,8 @@
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Clock, Mail, MapPin, Phone } from 'lucide-react';
 import Logo from './Logo';
+import { useDemo } from '../store/DemoContext';
+import { dashboardForRole } from '../utils/authRoutes';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -10,17 +12,49 @@ const quickLinks = [
   { label: 'Home', to: '/' },
   { label: 'Services', to: '/services' },
   { label: 'Specialists', to: '/specialists' },
+  { label: 'Providers', to: '/providers' },
   { label: 'Book appointment', to: '/booking' },
 ];
 
-const accountLinks = [
-  { label: 'Login', to: '/login' },
-  { label: 'Create account', to: '/register' },
-  { label: 'My appointments', to: '/customer/appointments' },
-  { label: 'My profile', to: '/customer/profile' },
-];
+function accountLinksFor(user, isLoggedIn) {
+  if (!isLoggedIn) {
+    return [
+      { label: 'Customer login', to: '/login' },
+      { label: 'Provider login', to: '/provider/login' },
+      { label: 'Admin login', to: '/admin/login' },
+      { label: 'Create customer account', to: '/register' },
+      { label: 'Become a provider', to: '/provider/register' },
+    ];
+  }
+
+  if (user?.role === 'ADMIN') {
+    return [
+      { label: 'Admin overview', to: '/admin' },
+      { label: 'Approvals', to: '/admin/approvals' },
+      { label: 'Appointments', to: '/admin/appointments' },
+    ];
+  }
+
+  if (user?.role === 'PROVIDER') {
+    return [
+      { label: 'Provider dashboard', to: '/provider' },
+      { label: 'My services', to: '/provider/services' },
+      { label: 'Availability', to: '/provider/availability' },
+      { label: 'Provider profile', to: '/provider/profile' },
+    ];
+  }
+
+  return [
+    { label: 'My dashboard', to: dashboardForRole(user?.role) },
+    { label: 'My appointments', to: '/customer/appointments' },
+    { label: 'My profile', to: '/customer/profile' },
+  ];
+}
 
 export default function Footer() {
+  const { user, isLoggedIn } = useDemo();
+  const accountLinks = accountLinksFor(user, isLoggedIn);
+
   return (
     <footer className="relative overflow-hidden bg-ink text-white">
       <div

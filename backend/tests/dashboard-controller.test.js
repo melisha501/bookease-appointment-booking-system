@@ -68,6 +68,7 @@ function basePrisma(overrides = {}) {
     user: { count: async () => 0 },
     specialist: { count: async () => 0 },
     service: { count: async () => 0 },
+    provider: { count: async () => 0 },
     appointment: {
       groupBy: async () => [],
       findMany: async () => [],
@@ -80,6 +81,8 @@ test("getDashboardStats returns live counts, status breakdown, activity, and rec
   const today = utcDayOffset(0);
   const twoDaysAgo = utcDayOffset(-2);
   let customerCountWhere = null;
+  let providerCountArgs = [];
+  let serviceCountArgs = [];
   let recentArgs = null;
   let activityArgs = null;
 
@@ -91,7 +94,18 @@ test("getDashboardStats returns live counts, status breakdown, activity, and rec
       },
     },
     specialist: { count: async () => 4 },
-    service: { count: async () => 12 },
+    service: {
+      count: async (args) => {
+        serviceCountArgs.push(args);
+        return args && args.where ? 1 : 12;
+      },
+    },
+    provider: {
+      count: async (args) => {
+        providerCountArgs.push(args);
+        return args && args.where ? 2 : 5;
+      },
+    },
     appointment: {
       groupBy: async (args) => {
         assert.deepEqual(args.by, ["status"]);
@@ -133,6 +147,9 @@ test("getDashboardStats returns live counts, status breakdown, activity, and rec
     totalCustomers: 3,
     totalProviders: 4,
     totalServices: 12,
+    providerAccounts: 5,
+    pendingProviderAccounts: 2,
+    pendingServiceApprovals: 1,
     totalAppointments: 11,
     pendingAppointments: 2,
     confirmedAppointments: 3,
@@ -189,6 +206,8 @@ test("getDashboardStats returns live counts, status breakdown, activity, and rec
 
   // Customers only: administrators are never counted as customers.
   assert.deepEqual(customerCountWhere, { role: "CUSTOMER" });
+  assert.deepEqual(providerCountArgs, [undefined, { where: { status: "pending" } }]);
+  assert.deepEqual(serviceCountArgs, [undefined, { where: { approvalStatus: "pending" } }]);
   assert.deepEqual(recentArgs.include, { service: true, specialist: true });
   assert.deepEqual(recentArgs.orderBy, [{ createdAt: "desc" }]);
   assert.equal(recentArgs.take, 6);
@@ -210,6 +229,9 @@ test("getDashboardStats returns zeroed statistics and a stable 7-day chart for a
     totalCustomers: 0,
     totalProviders: 0,
     totalServices: 0,
+    providerAccounts: 0,
+    pendingProviderAccounts: 0,
+    pendingServiceApprovals: 0,
     totalAppointments: 0,
     pendingAppointments: 0,
     confirmedAppointments: 0,

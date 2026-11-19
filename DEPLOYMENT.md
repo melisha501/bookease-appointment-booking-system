@@ -62,6 +62,8 @@ NODE_ENV=development
 FRONTEND_URL=http://localhost:5173
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/appointment_booking?schema=public"
 JWT_SECRET="replace-with-a-long-random-secret"
+ADMIN_EMAIL="admin@example.com"
+ADMIN_PASSWORD="replace-with-a-long-unique-password"
 ```
 
 Then:
@@ -89,7 +91,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`, log in as the seeded admin (`admin@bookease.com` / `Admin@123`), and confirm services and providers load.
+Open `http://localhost:5173`, sign in at **`/admin/login`** with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` used during seeding, and confirm services and specialists load. Provider accounts appear only after a provider registers and an admin approves it under `/admin/approvals`.
 
 ### Automated checks
 
@@ -162,7 +164,7 @@ Verify in Neon's **Tables** view that these tables exist:
 
 Restore your local `DATABASE_URL` afterwards.
 
-> **Seed warning:** `npm run db:seed` upserts the demo admin and resets its password to `Admin@123`. Change the admin password after deployment. Do not run the seed repeatedly on a live database unless you intend to reset the admin password.
+> **Seed safety:** `npm run db:seed` creates the admin only when `ADMIN_EMAIL` / `ADMIN_PASSWORD` are set and that email does not already exist. It never resets an existing password and never prints the password. Production seeding fails if those variables are missing. Keep the password out of committed files; remove the bootstrap values from persistent configuration after the account exists if you do not need to re-run the seed.
 
 ### Supabase alternative
 
@@ -288,9 +290,9 @@ After the first successful deploy, open the Render service → **Shell** and run
 npm run db:seed
 ```
 
-This creates the categories, services, providers, working hours, and admin account. It is idempotent and does not delete existing appointments.
+Before running it, set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in Render's environment (or in the local shell when seeding from your machine). This creates the catalog data and, only on first use of that email, the administrator. It is idempotent, does not reset passwords, and does not delete existing appointments. Production seeding fails clearly when the admin bootstrap variables are missing.
 
-If the Shell is unavailable on your plan, run the seed locally with `DATABASE_URL` pointed at production.
+If the Shell is unavailable on your plan, run the seed locally with `DATABASE_URL` pointed at production. After the admin exists, sign in at **`/admin/login`**, then approve provider registrations and provider-created services under `/admin/approvals` so they appear publicly.
 
 ### 4.2 Verify the backend
 
@@ -335,9 +337,11 @@ If you see `503`, the API is running but the database is not reachable. Check `D
    - **Output Directory:** `dist`
 5. Add an environment variable:
    - **Name:** `VITE_API_BASE`
-   - **Value:** `https://<your-service>.onrender.com/api`
+   - **Value:** `https://bookease-appointment-booking-system.onrender.com/api`
    - Apply to **Production**, **Preview**, and **Development** if desired.
 6. Click **Deploy**.
+
+The frontend also has a safety fallback for this project's `*.vercel.app` hosts when `VITE_API_BASE` is unset. Vercel rewrites `/api/*` to `index.html`, so explicitly setting the variable is still recommended, especially for custom domains or a different backend.
 
 `frontend/vercel.json` already configures:
 
@@ -477,7 +481,7 @@ From your local machine:
 ```powershell
 cd backend
 $env:SMOKE_API_BASE="https://<your-service>.onrender.com/api"
-$env:SMOKE_ADMIN_EMAIL="admin@bookease.com"
+$env:SMOKE_ADMIN_EMAIL="<the ADMIN_EMAIL used for bootstrap>"
 $env:SMOKE_ADMIN_PASSWORD="<the production admin password>"
 $env:SMOKE_EMAIL_DOMAIN="<a domain you control>"
 npm run smoke
@@ -488,7 +492,7 @@ On macOS/Linux:
 ```bash
 cd backend
 SMOKE_API_BASE="https://<your-service>.onrender.com/api" \
-SMOKE_ADMIN_EMAIL="admin@bookease.com" \
+SMOKE_ADMIN_EMAIL="<the ADMIN_EMAIL used for bootstrap>" \
 SMOKE_ADMIN_PASSWORD="<the production admin password>" \
 SMOKE_EMAIL_DOMAIN="<a domain you control>" \
 npm run smoke
@@ -503,7 +507,8 @@ Expected: every check passes, including health, catalog, availability, registrat
 Complete every item in [`TESTING.md`](./TESTING.md). At minimum:
 
 - Register a new customer.
-- Log in as the customer and as the administrator.
+- Log in as the customer at `/login`, as the provider at `/provider/login`, and as the administrator at `/admin/login`.
+- Register a provider, confirm its profile is hidden publicly, approve it at `/admin/approvals`, then confirm it appears at `/providers`.
 - Create a booking and verify the slot becomes unavailable.
 - Try to book the same slot again — it must be rejected.
 - Confirm emails arrive.
@@ -512,7 +517,7 @@ Complete every item in [`TESTING.md`](./TESTING.md). At minimum:
 - Refresh and confirm data/images persist.
 - Test all navigation links and protected routes.
 - Check browser console and Render logs for errors.
-- Test desktop, tablet, and mobile widths.
+- Test 375px, 430px, 768px, and 1366px widths.
 
 Do not report the deployment as successful until these pass.
 
@@ -523,7 +528,7 @@ Do not report the deployment as successful until these pass.
 - [ ] `backend/.env` is not in GitHub.
 - [ ] No secrets appear in `render.yaml`, `vercel.json`, README, screenshots, or commits.
 - [ ] `JWT_SECRET` is long, random, and unique to production.
-- [ ] The default `Admin@123` password has been changed.
+- [ ] The administrator was bootstrapped with `ADMIN_EMAIL` / `ADMIN_PASSWORD`, and no default admin password remains.
 - [ ] Neon/Supabase credentials are stored only in Render.
 - [ ] Resend and UploadThing keys are stored only in Render.
 - [ ] `FRONTEND_URL` and `CORS_ORIGINS` contain only your real frontend origins.
@@ -558,7 +563,7 @@ Do not report the deployment as successful until these pass.
 | Image upload returns `502` | UploadThing rejected the upload itself | Check file type/size (JPG/PNG/WEBP, max 4 MB) and UploadThing dashboard logs. A bad token is now a `503`, never a `502`. |
 | Refreshing a React route returns 404 | SPA rewrite missing | Confirm `frontend/vercel.json` is deployed with the frontend. |
 | Vercel build fails | Wrong root directory or Node version | Set root directory `frontend`; use Node 20/22. |
-| Admin login works locally but not in production | Production database was not seeded | Run `npm run db:seed` against production, then change the password. |
+| Admin login works locally but not in production | Production database was not bootstrapped, or the wrong portal was used | Set `ADMIN_EMAIL` / `ADMIN_PASSWORD`, run `npm run db:seed` against production, then sign in at `/admin/login`. |
 | Appointment slots look wrong | Provider working hours/timezone differ | Check the provider schedule and the Render service timezone. |
 
 ---

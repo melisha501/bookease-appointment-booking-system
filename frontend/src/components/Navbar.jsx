@@ -8,6 +8,7 @@ import { CalendarCheck, LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
 import Logo from './Logo';
 import Button from './Button';
 import { useDemo } from '../store/DemoContext';
+import { dashboardForRole, loginForRole } from '../utils/authRoutes';
 
 // Mobile keeps the full public menu; the desktop bar is trimmed so the
 // "Become a Service Provider" entry point fits alongside the auth actions.
@@ -48,8 +49,7 @@ export default function Navbar() {
   const { isLoggedIn, user, logout } = useDemo();
   const navigate = useNavigate();
   const location = useLocation();
-  const dashboardTo =
-    user?.role === 'ADMIN' ? '/admin' : user?.role === 'PROVIDER' ? '/provider' : '/customer';
+  const dashboardTo = dashboardForRole(user?.role);
 
   // Close the drawer whenever the route changes (including back/forward).
   useEffect(() => {
@@ -67,9 +67,10 @@ export default function Navbar() {
   }, [open]);
 
   const handleLogout = async () => {
+    const loginTo = loginForRole(user?.role);
     setOpen(false);
     await logout();
-    navigate('/login');
+    navigate(loginTo, { replace: true });
   };
 
   return (
@@ -82,6 +83,7 @@ export default function Navbar() {
             <NavLink
               key={link.to}
               to={link.to}
+              end={link.to === '/'}
               className={
                 link.accent
                   ? ({ isActive }) =>
@@ -121,6 +123,9 @@ export default function Navbar() {
             <>
               <Button to="/provider/login" variant="ghost" size="sm">
                 Provider login
+              </Button>
+              <Button to="/admin/login" variant="ghost" size="sm">
+                Admin login
               </Button>
               <Button to="/login" variant="ghost" size="sm">
                 Customer login
@@ -210,6 +215,9 @@ export default function Navbar() {
                   </Button>
                   <Button to="/provider/login" variant="secondary" fullWidth onClick={() => setOpen(false)}>
                     Provider login
+                  </Button>
+                  <Button to="/admin/login" variant="secondary" fullWidth onClick={() => setOpen(false)}>
+                    Admin login
                   </Button>
                   <Button to="/provider/register" variant="soft" fullWidth onClick={() => setOpen(false)}>
                     Become a service provider

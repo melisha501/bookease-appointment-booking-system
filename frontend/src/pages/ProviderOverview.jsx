@@ -2,7 +2,7 @@
 // Shows the provider's approval state, catalog stats, and recent bookings.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   BadgeCheck,
   CalendarDays,
@@ -62,6 +62,7 @@ function StatTile({ label, value, hint, icon: Icon }) {
 }
 
 export default function ProviderOverview() {
+  const location = useLocation();
   const [data, setData] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +149,15 @@ export default function ProviderOverview() {
 
   return (
     <div className="space-y-6">
+      {location.state?.providerRegistered ? (
+        <div
+          role="status"
+          className="rounded-xl border border-teal-100 bg-teal-50 px-4 py-3 text-sm font-medium text-teal-deep"
+        >
+          Your provider account was created successfully. New profiles and services are reviewed by an
+          administrator before customers can see them.
+        </div>
+      ) : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex items-center gap-3">
           {provider.logo ? (

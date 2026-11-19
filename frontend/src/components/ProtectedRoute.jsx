@@ -4,6 +4,7 @@
 
 import { Navigate, useLocation } from 'react-router-dom';
 import { useDemo } from '../store/DemoContext';
+import { dashboardForRole, loginForRole } from '../utils/authRoutes';
 
 function SessionSkeleton() {
   return (
@@ -19,12 +20,6 @@ function SessionSkeleton() {
   );
 }
 
-function dashboardForRole(role) {
-  if (role === 'ADMIN') return '/admin';
-  if (role === 'PROVIDER') return '/provider';
-  return '/customer';
-}
-
 export default function ProtectedRoute({ children, role }) {
   const { isLoggedIn, authLoading, user } = useDemo();
   const location = useLocation();
@@ -32,12 +27,17 @@ export default function ProtectedRoute({ children, role }) {
   if (authLoading) return <SessionSkeleton />;
 
   if (!isLoggedIn) {
-    const loginTo = role === 'PROVIDER' ? '/provider/login' : '/login';
-    return <Navigate to={loginTo} replace state={{ from: location }} />;
+    return <Navigate to={loginForRole(role)} replace state={{ from: location }} />;
   }
 
   if (role && user?.role !== role) {
-    return <Navigate to={dashboardForRole(user?.role)} replace />;
+    return (
+      <Navigate
+        to={dashboardForRole(user?.role)}
+        replace
+        state={{ from: location, reason: 'wrong-role' }}
+      />
+    );
   }
 
   return children;

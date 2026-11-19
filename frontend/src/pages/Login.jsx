@@ -18,14 +18,16 @@ import {
 import AuthShell from '../components/AuthShell';
 import Button from '../components/Button';
 import { useDemo } from '../store/DemoContext';
+import { dashboardForRole, loginForRole, roleMatchesPortal } from '../utils/authRoutes';
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 export default function Login({ portal = 'customer' }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, user, isLoggedIn, authLoading } = useDemo();
+  const { login, logout, user, isLoggedIn, authLoading } = useDemo();
   const providerMode = portal === 'provider';
+  const adminMode = portal === 'admin';
 
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -44,13 +46,14 @@ export default function Login({ portal = 'customer' }) {
     return () => clearTimeout(timer);
   }, [loading]);
 
-  const roleHome = user?.role === 'ADMIN' ? '/admin' : user?.role === 'PROVIDER' ? '/provider' : '/customer';
-
-  // Already signed in? Go straight to the right dashboard.
+  // Already signed in? Only auto-redirect when this portal matches the active
+  // role. Otherwise the user is deliberately switching accounts and must see
+  // the login form.
   useEffect(() => {
     if (authLoading || !isLoggedIn) return;
-    navigate(roleHome, { replace: true });
-  }, [authLoading, isLoggedIn, roleHome, navigate]);
+    if (!roleMatchesPortal(portal, user?.role)) return;
+    navigate(dashboardForRole(user?.role), { replace: true });
+  }, [authLoading, isLoggedIn, portal, user?.role, navigate]);
 
   const update = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -76,14 +79,24 @@ export default function Login({ portal = 'customer' }) {
     try {
       const data = await login({ email: form.email.trim(), password: form.password });
       const role = data?.user?.role;
+
+      // Keep the three portals separate: credentials are valid globally, but
+      // each sign-in page is reserved for its own role.
+      if (!roleMatchesPortal(portal, role)) {
+        await logout();
+        const correctLogin = role === 'ADMIN' ? '/admin/login' : loginForRole(role);
+        const label = role === 'ADMIN' ? 'administrator' : role === 'PROVIDER' ? 'provider' : 'customer';
+        setError(`This account is a ${label} account. Please sign in at ${correctLogin}.`);
+        return;
+      }
+
       const from = location.state?.from?.pathname;
       const fromMatchesRole =
         from &&
         ((role === 'ADMIN' && from.startsWith('/admin')) ||
           (role === 'PROVIDER' && from.startsWith('/provider')) ||
           (role === 'CUSTOMER' && from.startsWith('/customer')));
-      const fallback = role === 'ADMIN' ? '/admin' : role === 'PROVIDER' ? '/provider' : '/customer';
-      navigate(fromMatchesRole ? from : fallback, { replace: true });
+      navigate(fromMatchesRole ? from : dashboardForRole(role), { replace: true });
     } catch (err) {
       const retryAfter = Number(err?.data?.retryAfterSeconds);
       if (retryAfter > 0) {
@@ -104,35 +117,63 @@ export default function Login({ portal = 'customer' }) {
 
   return (
     <AuthShell
-      eyebrow={providerMode ? 'Provider portal' : 'Welcome back'}
-      title={providerMode ? 'Manage your services and bookings' : 'Sign in and pick up where you left off'}
+      eyebrow={adminMode ? 'Administrator portal' : providerMode ? 'Provider portal' : 'Welcome back'}
+      title={
+        adminMode
+          ? 'Sign in to manage the BookEase platform'
+          : providerMode
+            ? 'Manage your services and bookings'
+            : 'Sign in and pick up where you left off'
+      }
       description={
-        providerMode
-          ? 'Publish services, manage availability, and confirm customer appointments from one provider dashboard.'
-          : 'Manage upcoming appointments, keep your details current, and rebook your favourite services in a few taps.'
+        adminMode
+          ? 'Review provider applications, moderate services, and oversee every appointment from the admin dashboard.'
+          : providerMode
+            ? 'Publish services, manage availability, and confirm customer appointments from one provider dashboard.'
+            : 'Manage upcoming appointments, keep your details current, and rebook your favourite services in a few taps.'
       }
       points={
-        providerMode
+        adminMode
           ? [
-              'Create and edit your own services.',
-              'Track pending and confirmed bookings.',
-              'Update your profile, logo, and availability.',
+              'Approve or reject new provider accounts.',
+              'Moderate provider-created services.',
+              'Oversee customers, specialists, and appointments.',
             ]
-          : [
-              'See every booking and its live status in one place.',
-              'Cancel or review appointments without calling the studio.',
-              'Your contact details are pre-filled at checkout.',
-            ]
+          : providerMode
+            ? [
+                'Create and edit your own services.',
+                'Track pending and confirmed bookings.',
+                'Update your profile, logo, and availability.',
+              ]
+            : [
+                'See every booking and its live status in one place.',
+                'Cancel or review appointments without calling the studio.',
+                'Your contact details are pre-filled at checkout.',
+              ]
       }
     >
       <div>
         <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-teal-deep uppercase">
           <CalendarCheck className="h-4 w-4" aria-hidden="true" />
-          {providerMode ? 'Provider login' : 'Customer account login'}
+          {adminMode ? 'Administrator login' : providerMode ? 'Provider login' : 'Customer account login'}
         </div>
-        <h2 className="mt-2 text-h2">{providerMode ? 'Provider sign in' : 'Welcome back'}</h2>
+        <h2 className="mt-2 text-h2">
+          {adminMode ? 'Admin sign in' : providerMode ? 'Provider sign in' : 'Welcome back'}
+        </h2>
         <p className="mt-1 text-sm text-ink-soft">
-          {providerMode ? (
+          {adminMode ? (
+            <>
+              Administrator access is restricted. Use the{' '}
+              <Link to="/login" className="font-semibold text-teal-deep hover:underline">
+                customer login
+              </Link>{' '}
+              or{' '}
+              <Link to="/provider/login" className="font-semibold text-teal-deep hover:underline">
+                provider login
+              </Link>{' '}
+              for other accounts.
+            </>
+          ) : providerMode ? (
             <>
               New provider?{' '}
               <Link to="/provider/register" className="font-semibold text-teal-deep hover:underline">

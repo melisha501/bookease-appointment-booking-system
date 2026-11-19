@@ -52,8 +52,8 @@ Key rules implemented by the backend:
 
 ### Administrator features
 
-- Secure admin login and protected admin routes.
-- Dashboard statistics for appointments, customers, services, and providers.
+- Dedicated admin login at `/admin/login` and protected admin routes.
+- Dashboard statistics for appointments, customers, specialists, provider accounts, and approval queues.
 - Create, edit, and delete categories.
 - Create, edit, activate/deactivate, and delete services.
 - Create, edit, and delete providers (specialists).
@@ -62,6 +62,7 @@ Key rules implemented by the backend:
 - Add date exceptions (holidays/unavailable dates).
 - View and manage all appointments.
 - Approve, reject, confirm, complete, and cancel appointments.
+- Approve or reject provider registrations and provider-created services.
 - View customer records and a customer's appointment history.
 - Upload/replace/remove service images and provider photos with UploadThing.
 
@@ -168,7 +169,7 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
-Fill in `DATABASE_URL` and `JWT_SECRET`, then prepare the database:
+Fill in `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, and — before seeding — the one-time admin bootstrap values `ADMIN_EMAIL` and `ADMIN_PASSWORD` (plus optional `ADMIN_NAME`). Then prepare the database:
 
 ```bash
 npm run db:generate
@@ -176,6 +177,8 @@ npm run db:migrate     # development: creates/applies migrations
 npm run db:seed
 npm run dev
 ```
+
+`db:seed` creates the admin only if that email does not already exist. It never resets an existing password and never prints the password. Production seeding fails clearly when `ADMIN_EMAIL`/`ADMIN_PASSWORD` are missing.
 
 The API runs at `http://localhost:5000`. Confirm it is healthy:
 
@@ -220,6 +223,9 @@ Never commit real credentials. All backend secrets belong in `backend/.env` loca
 | `DATABASE_URL` | Yes | PostgreSQL connection string | `postgresql://USER:PASSWORD@HOST:5432/DB?schema=public` |
 | `JWT_SECRET` | Yes | Signs authentication tokens; use a long random value | `openssl rand -hex 32` |
 | `JWT_EXPIRES_IN` | No | Token lifetime | `7d` |
+| `ADMIN_EMAIL` | For seed | Email for the one-time, create-only administrator bootstrap | `admin@yourdomain.com` |
+| `ADMIN_PASSWORD` | For seed | Unique password (min. 8 chars) used only when creating that admin | long random value |
+| `ADMIN_NAME` | No | Display name for the bootstrapped admin | `Admin User` |
 | `TRUST_PROXY` | No | Reverse-proxy hops trusted for client IPs; defaults to `1` in production and `false` locally | `1` |
 | `FRONTEND_URL` | Yes | Primary allowed CORS origin and default app URL | `https://your-app.vercel.app` |
 | `CORS_ORIGINS` | No | Extra comma-separated allowed origins | `https://www.yourdomain.com,https://your-app.vercel.app` |
@@ -259,9 +265,9 @@ openssl rand -hex 32
 
 | Variable | Required | Purpose | Example |
 | --- | --- | --- | --- |
-| `VITE_API_BASE` | In production | Full backend API base URL, including `/api` | `https://bookease-api.onrender.com/api` |
+| `VITE_API_BASE` | Recommended in production | Full backend API base URL, including `/api` | `https://bookease-appointment-booking-system.onrender.com/api` |
 
-Local development can omit `VITE_API_BASE` and use the Vite proxy. If you set it locally, use `http://localhost:5000/api`.
+Local development can omit `VITE_API_BASE` and use the Vite proxy. If you set it locally, use `http://localhost:5000/api`. On a `*.vercel.app` host, the app falls back to this project's Render API when the variable is unset because Vercel's SPA rewrite would otherwise return `index.html` for `/api/*`. Set the variable explicitly for custom domains or a different backend.
 
 ## Database and seed data
 
@@ -285,21 +291,22 @@ npm run db:deploy
 
 `npm run db:deploy` runs `prisma migrate deploy`, which applies committed migrations without resetting data.
 
-The idempotent seed script creates six categories, 24 services, 12 providers, working hours, and a default admin account:
+The idempotent seed script creates six categories, 24 services, 12 specialists, working hours, and service assignments. It does **not** create `Provider` accounts. Public provider profiles are created only by real provider registration and become visible only after administrator approval.
 
 ```bash
 cd backend
+# Set ADMIN_EMAIL and ADMIN_PASSWORD first (see backend/.env.example).
 npm run db:seed
 ```
 
-Default local/demo admin credentials:
+The administrator is bootstrapped from `ADMIN_EMAIL` / `ADMIN_PASSWORD`:
 
-```text
-Email:    admin@bookease.com
-Password: Admin@123
-```
+- The account is created only if that email does not already exist.
+- Existing admins, passwords, roles, users, and appointments are never changed.
+- The password is never printed to logs.
+- In production, seeding fails clearly if the bootstrap variables are missing.
 
-> Change this password before using the application for real users. The seed script is idempotent and does not delete existing users or appointments.
+After seeding, sign in at **`/admin/login`**. To publish a provider: register at `/provider/register`, then approve the provider and its services from **`/admin/approvals`**. Approved, active providers then appear at `/providers`.
 
 ## API documentation
 
@@ -349,6 +356,21 @@ Login request:
 ```
 
 Both return `{ success, message, token, user }`.
+
+### Provider accounts and approvals
+
+| Method | Endpoint | Access | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/auth/register-provider` | Public | Create a `PROVIDER` user and a pending `Provider` profile. |
+| `GET` | `/providers` | Public | List approved, active provider accounts. |
+| `GET` | `/providers/:id` | Public | Approved, active provider details. |
+| `GET` | `/providers/me` | Provider | Current provider profile. |
+| `GET` | `/admin/providers?status=pending` | Admin | List provider accounts awaiting review. |
+| `PATCH` | `/admin/providers/:id` | Admin | Approve/reject a provider, e.g. `{ "status": "approved", "isActive": true }`. |
+| `GET` | `/admin/services?approvalStatus=pending` | Admin | List provider-created services awaiting review. |
+| `PATCH` | `/admin/services/:id/approval` | Admin | Approve/reject a service, e.g. `{ "status": "approved" }`. |
+
+The seed's 12 specialists are catalog records, not public provider accounts. A provider profile and each of its services must be approved before they appear in the public directory.
 
 ### Categories
 
@@ -649,10 +671,10 @@ Beginner-friendly step-by-step instructions are in [`DEPLOYMENT.md`](./DEPLOYMEN
 1. Create a Neon or Supabase PostgreSQL database and copy its connection string.
 2. Push the repository to a public GitHub repository.
 3. Create a Render web service from `render.yaml` or manually from the `backend/` folder.
-4. Set `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `CORS_ORIGINS`, Resend, and UploadThing variables in Render.
+4. Set `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `CORS_ORIGINS`, Resend, and UploadThing variables in Render. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` before seeding only; they create the first admin and are never printed.
 5. Run `npm run db:deploy` and `npm run db:seed` against the production database.
 6. Import the repository into Vercel with root directory `frontend`.
-7. Set `VITE_API_BASE=https://<your-render-service>.onrender.com/api` in Vercel and redeploy.
+7. Set `VITE_API_BASE=https://bookease-appointment-booking-system.onrender.com/api` in Vercel and redeploy.
 8. Update `FRONTEND_URL` in Render with the Vercel production URL and redeploy the backend. This project's Vercel preview and git-main URLs are allowed automatically by the strict project/team hostname rule.
 9. Verify `https://<your-render-service>.onrender.com/api/health`.
 10. Run `npm run smoke` against the live API and complete [`TESTING.md`](./TESTING.md).
@@ -681,5 +703,5 @@ Fill these in after deployment:
 - **Email delivery is retried, not guaranteed.** A Resend outage does not roll back bookings; failed messages are retried from the outbox and marked `failed` with an error after the retry limit. Delivery cannot be guaranteed by the API response.
 - **No payment integration.** Prices are displayed but payments are handled outside the application.
 - **Rate limiting, no CAPTCHA.** Login and registration are rate limited per IP. There is no CAPTCHA or account lockout, and broader abuse protection for public booking endpoints is still a deployment concern.
-- **Default seeded admin password.** `Admin@123` is for local/demo use and must be changed for production.
+- **Admin password rotation is manual.** The seed is create-only and never resets a password. Rotate a compromised admin password through a trusted database/admin process.
 - **Browser E2E is manual.** Backend tests and the API smoke test are automated; the responsive UI and route checklist in `TESTING.md` must be completed manually.

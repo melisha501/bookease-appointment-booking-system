@@ -80,7 +80,7 @@ function PasswordField({ id, label, value, onChange, placeholder, error, autoCom
 
 export default function Register() {
   const navigate = useNavigate();
-  const { register, user, isLoggedIn, authLoading } = useDemo();
+  const { register } = useDemo();
 
   const [form, setForm] = useState({
     name: '',
@@ -103,11 +103,6 @@ export default function Register() {
     const timer = setTimeout(() => setSlow(true), 6000);
     return () => clearTimeout(timer);
   }, [loading]);
-
-  useEffect(() => {
-    if (authLoading || !isLoggedIn) return;
-    navigate(user?.role === 'ADMIN' ? '/admin' : '/customer', { replace: true });
-  }, [authLoading, isLoggedIn, user, navigate]);
 
   const update = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));

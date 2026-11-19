@@ -1,6 +1,7 @@
-// Seed script: categories, services, specialists, schedules, assignments, and admin account.
-// Stores data in PostgreSQL via Prisma. Safe to run multiple times (upserts by unique slugs/emails).
-// Does NOT drop/reset the database and does NOT delete existing user accounts or appointments.
+// Seed script: categories, services, specialists, schedules, and assignments.
+// Optionally bootstraps one administrator from ADMIN_EMAIL / ADMIN_PASSWORD.
+// Stores data in PostgreSQL via Prisma. Safe to run multiple times (upserts by unique slugs).
+// Does NOT drop/reset the database, reset passwords, or delete user accounts/appointments.
 
 require("dotenv").config();
 const bcrypt = require("bcryptjs");
@@ -449,16 +450,67 @@ const scheduleOverrides = {
   "asmita-joshi": { days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], startTime: "09:30 AM", endTime: "05:30 PM" },
 };
 
-async function main() {
-  const adminEmail = "admin@bookease.com";
-  const adminPassword = "Admin@123";
-  const adminHash = await bcrypt.hash(adminPassword, 10);
+function readAdminBootstrapConfig() {
+  const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || "";
+  const name = String(process.env.ADMIN_NAME || "Admin User").trim() || "Admin User";
 
-  await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: { name: "Admin User", role: "ADMIN", passwordHash: adminHash },
-    create: { name: "Admin User", email: adminEmail, passwordHash: adminHash, role: "ADMIN" },
+  if (!email || !password) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Production admin bootstrap requires ADMIN_EMAIL and ADMIN_PASSWORD. Set them before running npm run db:seed; no hardcoded admin credentials are used."
+      );
+    }
+    return null;
+  }
+
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    throw new Error("ADMIN_EMAIL must be a valid email address.");
+  }
+  if (password.length < 8) {
+    throw new Error("ADMIN_PASSWORD must be at least 8 characters long.");
+  }
+
+  return { email, password, name };
+}
+
+async function bootstrapAdmin() {
+  const config = readAdminBootstrapConfig();
+  if (!config) {
+    console.log(
+      "Admin bootstrap skipped: set ADMIN_EMAIL and ADMIN_PASSWORD to create an administrator. No default credentials are used."
+    );
+    return;
+  }
+
+  const existing = await prisma.user.findUnique({ where: { email: config.email } });
+  if (existing) {
+    if (existing.role !== "ADMIN") {
+      throw new Error(
+        `ADMIN_EMAIL (${config.email}) already belongs to a ${existing.role} account. Choose a different address; the seed never changes existing roles or passwords.`
+      );
+    }
+    console.log(
+      `Admin bootstrap skipped: ${config.email} already exists. Its password was not changed.`
+    );
+    return;
+  }
+
+  await prisma.user.create({
+    data: {
+      name: config.name,
+      email: config.email,
+      passwordHash: await bcrypt.hash(config.password, 12),
+      role: "ADMIN",
+    },
   });
+  console.log(
+    `Admin account created for ${config.email}. Store its password securely; this script never prints it.`
+  );
+}
+
+async function main() {
+  await bootstrapAdmin();
 
   // Upsert required categories (keeps operation idempotent). Existing unrelated categories are left untouched.
   for (const c of categories) {
@@ -549,18 +601,21 @@ async function main() {
     prisma.specialist.count({ where: { slug: { in: requiredSpecialistSlugs } } }),
   ]);
 
-  console.log("Seed complete (idempotent). No user accounts or appointments were deleted.");
+  console.log("Seed complete (idempotent). No user accounts, passwords, or appointments were changed.");
   console.log(
     `Required dataset present: ${cCount} categories, ${sCount} services, ${spCount} specialists (with working hours upserted for each).`
   );
-  console.log("Admin login:", adminEmail, "/", adminPassword);
 }
 
-main()
-  .catch((e) => {
-    console.error("Seed failed:", e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (require.main === module) {
+  main()
+    .catch((e) => {
+      console.error("Seed failed:", e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}
+
+module.exports = { bootstrapAdmin, main, readAdminBootstrapConfig };

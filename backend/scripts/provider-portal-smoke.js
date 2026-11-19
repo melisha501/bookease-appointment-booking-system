@@ -19,7 +19,12 @@
  *
  * Usage:
  *   cd backend
+ *   SMOKE_ADMIN_EMAIL="admin@yourdomain.com" \
+ *   SMOKE_ADMIN_PASSWORD="<the admin password>" \
  *   npm run smoke:provider
+ *
+ * No default administrator credentials are used; set the variables above or
+ * provide ADMIN_EMAIL / ADMIN_PASSWORD in backend/.env.
  */
 
 require("dotenv").config();
@@ -27,8 +32,8 @@ require("dotenv").config();
 const prisma = require("../src/lib/prisma");
 
 const API_BASE = (process.env.SMOKE_API_BASE || "http://localhost:5000/api").replace(/\/+$/, "");
-const ADMIN_EMAIL = process.env.SMOKE_ADMIN_EMAIL || process.env.ADMIN_EMAIL || "admin@bookease.com";
-const ADMIN_PASSWORD = process.env.SMOKE_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || "Admin@123";
+const ADMIN_EMAIL = process.env.SMOKE_ADMIN_EMAIL || process.env.ADMIN_EMAIL || "";
+const ADMIN_PASSWORD = process.env.SMOKE_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || "";
 const RUN_ID = `${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 const PREFIX = `provider-portal-smoke-${RUN_ID}`;
 const PASSWORD = "SmokeTest@123";
@@ -158,7 +163,16 @@ async function cleanup() {
   }
 }
 
+function assertAdminCredentials() {
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+    throw new Error(
+      "Provider smoke test requires SMOKE_ADMIN_EMAIL and SMOKE_ADMIN_PASSWORD (or ADMIN_EMAIL and ADMIN_PASSWORD in backend/.env). No default admin credentials are used."
+    );
+  }
+}
+
 async function main() {
+  assertAdminCredentials();
   console.log("BookEase provider portal smoke test");
   console.log(`API: ${API_BASE}`);
   console.log(`Test records: ${PREFIX}*`);

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, clearToken, getToken, setToken } from "../api/client";
+import { api, clearToken, getToken, setToken, setUnauthorizedHandler } from "../api/client";
 import { canCancelAppointment, DemoContext } from "./DemoContext";
 
 // Stable empty list so the context value memo isn't invalidated on every render.
@@ -248,6 +248,13 @@ export function DemoProvider({ children }) {
     };
   }, [loadCatalog]);
 
+  // Any API 401 clears the token in the client. Mirror that into React state so
+  // navigation and protected routes immediately reflect the ended session.
+  useEffect(() => {
+    setUnauthorizedHandler(() => setUser(null));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
   // Restore session from backend if a token exists. The request is bounded so
   // a sleeping backend can never leave the app stuck on "Checking session".
   useEffect(() => {
@@ -313,13 +320,15 @@ export function DemoProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Clear the local session first: logout must never feel frozen while the
+    // optional server acknowledgement is in flight.
+    clearToken();
+    setUser(null);
     try {
-      await api.post("/auth/logout", {}, { timeout: 6000, retries: 0 });
+      await api.post("/auth/logout", {}, { timeout: 3000, retries: 0 });
     } catch {
       // stateless logout; ignore network errors
     }
-    clearToken();
-    setUser(null);
   }, []);
 
   const refreshUser = useCallback(async () => {

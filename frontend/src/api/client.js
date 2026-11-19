@@ -1,10 +1,36 @@
 // Small API client for talking to the Express backend.
-// - Uses Vite dev proxy (/api) by default, or VITE_API_BASE if set.
+// - Uses VITE_API_BASE when set, the known production API on Vercel, or the
+//   Vite dev proxy (/api) locally.
 // - Attaches JWT from localStorage when present.
-// - Handles 401 (expired/invalid token) by clearing auth and redirecting to /login.
+// - Notifies the auth context on 401 so the UI no longer shows a stale session.
 
-const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+// Vercel rewrites every path (including /api/*) to index.html. A deployed
+// frontend without VITE_API_BASE would therefore receive HTML instead of JSON.
+const PRODUCTION_API_BASE = "https://bookease-appointment-booking-system.onrender.com/api";
+
+function resolveApiBase() {
+  const configured = import.meta.env.VITE_API_BASE;
+  if (configured) return String(configured).replace(/\/+$/, "");
+  if (import.meta.env.PROD && typeof window !== "undefined") {
+    const host = window.location.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1") return "/api";
+    if (host.endsWith(".vercel.app")) return PRODUCTION_API_BASE;
+  }
+  return "/api";
+}
+
+const API_BASE = resolveApiBase();
 const TOKEN_KEY = "bookease_token";
+
+let unauthorizedHandler = null;
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = typeof handler === "function" ? handler : null;
+}
+
+function notifyUnauthorized() {
+  if (unauthorizedHandler) unauthorizedHandler();
+}
 
 export function getToken() {
   try {
@@ -129,7 +155,7 @@ async function performRequest(url, fetchOptions, headers, timeout) {
 
   if (res.status === 401) {
     clearToken();
-    // Avoid redirect loops; let auth-aware UI react. For protected flows, navigate on catch.
+    notifyUnauthorized();
     const error = new Error((data && data.message) || "Session expired. Please log in again.");
     error.status = 401;
     error.data = data;
@@ -239,6 +265,7 @@ export function postFormWithProgress(path, formData, onProgress) {
 
       if (xhr.status === 401) {
         clearToken();
+        notifyUnauthorized();
         const error = new Error((data && data.message) || "Session expired. Please log in again.");
         error.status = 401;
         error.data = data;

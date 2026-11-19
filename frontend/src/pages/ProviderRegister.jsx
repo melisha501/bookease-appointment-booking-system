@@ -6,6 +6,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   Building2,
+  Globe,
   LoaderCircle,
   Mail,
   MapPin,
@@ -36,7 +37,7 @@ const EMPTY_FORM = {
 
 export default function ProviderRegister() {
   const navigate = useNavigate();
-  const { registerProvider, user, isLoggedIn, authLoading } = useDemo();
+  const { registerProvider } = useDemo();
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState('');
   const [fieldError, setFieldError] = useState('');
@@ -52,11 +53,6 @@ export default function ProviderRegister() {
     const timer = setTimeout(() => setSlow(true), 6000);
     return () => clearTimeout(timer);
   }, [loading]);
-
-  useEffect(() => {
-    if (authLoading || !isLoggedIn) return;
-    navigate(user?.role === 'PROVIDER' ? '/provider' : '/customer', { replace: true });
-  }, [authLoading, isLoggedIn, user, navigate]);
 
   const update = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -90,7 +86,7 @@ export default function ProviderRegister() {
         address: form.address.trim(),
         website: form.website.trim(),
       });
-      navigate('/provider', { replace: true });
+      navigate('/provider', { replace: true, state: { providerRegistered: true } });
     } catch (err) {
       setError(err?.message || 'Could not create your provider account.');
     } finally {
@@ -227,6 +223,23 @@ export default function ProviderRegister() {
                 value={form.address}
                 onChange={(event) => update('address', event.target.value)}
                 placeholder="Street, city"
+                className="field py-3 pr-3 pl-10"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="provider-website" className="field-label">
+              Website <span className="font-normal text-ink-soft">(optional)</span>
+            </label>
+            <div className="relative">
+              <Globe className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+              <input
+                id="provider-website"
+                type="url"
+                value={form.website}
+                onChange={(event) => update('website', event.target.value)}
+                placeholder="https://example.com"
                 className="field py-3 pr-3 pl-10"
               />
             </div>

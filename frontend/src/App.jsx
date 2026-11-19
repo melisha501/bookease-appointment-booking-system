@@ -124,6 +124,7 @@ export default function App() {
       <Route path="/login" element={<PublicLayout><Login /></PublicLayout>} />
       <Route path="/register" element={<PublicLayout><Register /></PublicLayout>} />
       <Route path="/provider/login" element={<PublicLayout><Login portal="provider" /></PublicLayout>} />
+      <Route path="/admin/login" element={<PublicLayout><Login portal="admin" /></PublicLayout>} />
       <Route path="/provider/register" element={<PublicLayout><ProviderRegister /></PublicLayout>} />
 
       {/* ----- Customer dashboard (protected) ----- */}

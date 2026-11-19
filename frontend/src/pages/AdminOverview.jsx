@@ -18,6 +18,7 @@ import {
   Layers,
   RefreshCw,
   Scissors,
+  ShieldCheck,
   Sparkles,
   UserCheck,
   Users,
@@ -35,6 +36,9 @@ const POLL_INTERVAL_MS = 30_000;
 const EMPTY_STATS = {
   totalCustomers: 0,
   totalProviders: 0,
+  providerAccounts: 0,
+  pendingProviderAccounts: 0,
+  pendingServiceApprovals: 0,
   totalServices: 0,
   totalAppointments: 0,
   pendingAppointments: 0,
@@ -299,10 +303,26 @@ export default function AdminOverview() {
         `${stats.pendingAppointments} pending request${stats.pendingAppointments === 1 ? '' : 's'}`
       );
     }
-    if (stats.totalProviders === 0) items.push('no providers configured');
+    if (stats.pendingProviderAccounts > 0) {
+      items.push(
+        `${stats.pendingProviderAccounts} provider application${stats.pendingProviderAccounts === 1 ? '' : 's'} awaiting review`
+      );
+    }
+    if (stats.pendingServiceApprovals > 0) {
+      items.push(
+        `${stats.pendingServiceApprovals} service${stats.pendingServiceApprovals === 1 ? '' : 's'} awaiting approval`
+      );
+    }
+    if (stats.providerAccounts === 0) items.push('no provider accounts registered');
     if (stats.totalServices === 0) items.push('no services in the catalog');
     return items;
-  }, [stats.pendingAppointments, stats.totalProviders, stats.totalServices]);
+  }, [
+    stats.pendingAppointments,
+    stats.pendingProviderAccounts,
+    stats.pendingServiceApprovals,
+    stats.providerAccounts,
+    stats.totalServices,
+  ]);
 
   return (
     <div className="space-y-6">
@@ -339,6 +359,10 @@ export default function AdminOverview() {
               <Button to="/admin/appointments" variant="light" size="sm">
                 <CalendarDays className="h-4 w-4" aria-hidden="true" />
                 Manage appointments
+              </Button>
+              <Button to="/admin/approvals" variant="onDark" size="sm">
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                Review approvals
               </Button>
               <Button to="/admin/services" variant="onDark" size="sm">
                 <Scissors className="h-4 w-4" aria-hidden="true" />
@@ -407,9 +431,9 @@ export default function AdminOverview() {
               icon={Users}
             />
             <StatCard
-              title="Total providers"
+              title="Total specialists"
               value={stats.totalProviders}
-              subtitle="Service specialists"
+              subtitle="Service specialists in the catalog"
               icon={UserCheck}
             />
             <StatCard
@@ -426,6 +450,62 @@ export default function AdminOverview() {
               trend={`${activeAppointments} pending or confirmed`}
             />
           </section>
+
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="flex items-center gap-2 text-base font-bold text-ink">
+                  <ShieldCheck className="h-5 w-5 text-teal-deep" aria-hidden="true" />
+                  Provider accounts &amp; approvals
+                </h3>
+                <p className="mt-1 text-sm text-ink-soft">
+                  Provider registrations are separate from catalog specialists. New accounts and
+                  provider-created services stay hidden from customers until approved.
+                </p>
+              </div>
+              <Link
+                to="/admin/approvals"
+                className="inline-flex items-center gap-1 text-sm font-semibold text-teal-deep hover:underline"
+              >
+                Open approval queue
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              {[
+                {
+                  label: 'Provider accounts',
+                  value: stats.providerAccounts,
+                  hint: 'Registered provider profiles',
+                  icon: UserCheck,
+                },
+                {
+                  label: 'Pending providers',
+                  value: stats.pendingProviderAccounts,
+                  hint: 'Applications awaiting review',
+                  icon: Clock,
+                },
+                {
+                  label: 'Pending services',
+                  value: stats.pendingServiceApprovals,
+                  hint: 'Services awaiting moderation',
+                  icon: Scissors,
+                },
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.label} className="rounded-xl border border-line bg-surface/60 p-4">
+                    <div className="flex items-center gap-2 text-xs font-bold tracking-wide text-ink-soft uppercase">
+                      <Icon className="h-4 w-4 text-teal-deep" aria-hidden="true" />
+                      {item.label}
+                    </div>
+                    <p className="mt-2 text-2xl font-bold tracking-tight text-ink">{item.value}</p>
+                    <p className="mt-0.5 text-xs text-ink-soft">{item.hint}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
 
           <section aria-label="Appointment status counts">
             <div className="mb-3 flex items-center justify-between gap-3">

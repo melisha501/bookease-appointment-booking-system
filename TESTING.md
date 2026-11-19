@@ -21,11 +21,11 @@ Record the date, tester, environment, and result for each section.
 - [ ] `backend/.env` exists and contains a valid `DATABASE_URL`, `JWT_SECRET`, and `FRONTEND_URL`.
 - [ ] `npm run db:generate` completed.
 - [ ] `npm run db:migrate` (local) or `npm run db:deploy` (production) completed.
-- [ ] `npm run db:seed` completed.
+- [ ] `npm run db:seed` completed with `ADMIN_EMAIL` / `ADMIN_PASSWORD` set for first-time admin bootstrap.
 - [ ] Backend is running.
 - [ ] Frontend is running or deployed.
 - [ ] `GET /api/health` returns `200` with `"database": "ok"`.
-- [ ] Admin account is available (`admin@bookease.com` / `Admin@123` locally; changed for production).
+- [ ] Admin account is available using the `ADMIN_EMAIL` / `ADMIN_PASSWORD` bootstrap values. The seed never prints or resets the password.
 - [ ] A second customer email inbox is available for registration and email testing.
 - [ ] Browser DevTools Console and Network tabs are open.
 
@@ -113,15 +113,16 @@ npm run smoke
 
 ### 3.2 Browse, search, and filter
 
-- [ ] Home page loads featured services/providers from the API.
-- [ ] `/services` lists services.
+- [ ] Home page loads featured services/specialists from the API.
+- [ ] `/services` lists services with search, filter, and sort controls.
 - [ ] Category filter updates the list and the URL/state.
 - [ ] Search filters by service name or keyword.
 - [ ] Empty search shows an empty state, not a crash.
-- [ ] Service details page shows description, price, duration, benefits, and assigned providers.
-- [ ] `/specialists` lists providers.
-- [ ] Provider details show bio, experience, services, and schedule.
-- [ ] Inactive services/providers are not shown in the public catalog.
+- [ ] Service details page shows description, price, duration, benefits, and assigned specialists.
+- [ ] `/specialists` lists catalog specialists.
+- [ ] `/providers` lists only approved, active provider accounts.
+- [ ] Specialist/provider details show bio, experience, services, and schedule where available.
+- [ ] Pending or inactive provider accounts/services are not shown publicly.
 
 ### 3.3 Date and time selection
 
@@ -140,7 +141,7 @@ npm run smoke
 
 - [ ] Complete the booking form with valid customer details.
 - [ ] Submit → success screen with a reference such as `APT-AB12CD`.
-- [ ] The appointment appears in `/my-appointments` (or the customer booking history).
+- [ ] The appointment appears in `/customer/appointments` (or the customer booking history).
 - [ ] Refresh → the appointment persists (PostgreSQL, not mock data).
 - [ ] The booked slot is no longer available in a second browser/incognito window.
 - [ ] Booking the same slot again returns a conflict message (`409`), not a duplicate.
@@ -176,8 +177,9 @@ npm run smoke
 
 ### 4.1 Authentication and protected routes
 
-- [ ] Log in with the admin account.
+- [ ] Log in with the admin account at `/admin/login` (not `/login`).
 - [ ] Admin dashboard loads.
+- [ ] Customer/provider credentials are rejected on `/admin/login`, and admin credentials are rejected on `/login` and `/provider/login`.
 - [ ] Customer account cannot open admin pages (redirect/forbidden).
 - [ ] Logged-out user cannot open admin pages (redirect to login).
 - [ ] `GET /api/appointments` with a customer token returns `403`.
@@ -197,14 +199,19 @@ npm run smoke
 - [ ] Validation rejects missing name, invalid price, and invalid duration.
 - [ ] "All" cannot be used as a category name.
 
-### 4.3 Providers
+### 4.3 Specialists and provider approvals
 
-- [ ] Create a provider with name, title, bio, experience, specialty, and photo.
-- [ ] Edit the provider.
+- [ ] Create a specialist with name, title, bio, experience, specialty, and photo.
+- [ ] Edit the specialist.
 - [ ] Assign/unassign services.
-- [ ] Deactivate/activate the provider and confirm public visibility changes.
-- [ ] Delete a provider (or confirm the intended safe behavior).
-- [ ] Provider photo appears on cards and the profile page.
+- [ ] Deactivate/activate the specialist and confirm public visibility changes.
+- [ ] Delete a specialist (or confirm the intended safe behavior).
+- [ ] Specialist photo appears on cards and the profile page.
+- [ ] Admin overview labels the specialist count "Total specialists" and shows provider accounts/pending approvals separately.
+- [ ] Register a provider at `/provider/register`; verify a pending `Provider` row is created and the profile is hidden from `/providers`.
+- [ ] Approve the provider at `/admin/approvals` with `status: approved` and `isActive: true`; verify it then appears at `/providers`.
+- [ ] Create a service in the provider portal; verify it stays hidden until approved at `/admin/approvals`.
+- [ ] Reject a provider/service and verify it remains hidden publicly.
 
 ### 4.4 Working hours and breaks
 
@@ -325,10 +332,11 @@ npm run smoke
 
 - [ ] Vercel build succeeds.
 - [ ] `VITE_API_BASE` points to the live Render API and includes `/api`.
-- [ ] Home page loads over HTTPS.
-- [ ] Public routes work: `/`, `/services`, `/services/:id`, `/specialists`, `/specialists/:id`, `/booking`, `/login`, `/register`.
-- [ ] Customer routes work after login: `/dashboard`, `/my-appointments`, `/my-appointments/:reference`, `/profile`.
-- [ ] Admin routes work after admin login: `/admin`, `/admin/appointments`, `/admin/services`, `/admin/categories`, `/admin/providers`, `/admin/working-hours`, `/admin/customers`.
+- [ ] Home page loads over HTTPS and the logo links to `/`.
+- [ ] Public routes work: `/`, `/services`, `/services/:id`, `/specialists`, `/specialists/:id`, `/providers`, `/providers/:id`, `/booking`, `/login`, `/register`, `/provider/login`, `/provider/register`, `/admin/login`.
+- [ ] Customer routes work after login: `/customer`, `/customer/appointments`, `/customer/appointments/details`, `/customer/profile`.
+- [ ] Provider routes work after login: `/provider`, `/provider/services`, `/provider/appointments`, `/provider/availability`, `/provider/profile`.
+- [ ] Admin routes work after admin login: `/admin`, `/admin/appointments`, `/admin/services`, `/admin/categories`, `/admin/providers`, `/admin/approvals`, `/admin/working-hours`, `/admin/customers`.
 - [ ] Refreshing each route returns the app, not a 404 (SPA rewrite).
 - [ ] Unknown route shows the app's not-found page, not a server error.
 - [ ] Browser console has no CORS, mixed-content, or unhandled promise errors.
@@ -342,9 +350,10 @@ npm run smoke
 
 Test at these widths using DevTools device mode:
 
-- [ ] Mobile: 375 px — navigation, cards, forms, booking steps, and tables remain usable.
-- [ ] Tablet: 768 px — layout adapts without horizontal scrolling.
-- [ ] Desktop: 1280 px+ — full layout renders correctly.
+- [ ] 375 px — navigation, cards, forms, booking steps, and tables remain usable.
+- [ ] 430 px — no horizontal scrolling or cut-off buttons.
+- [ ] 768 px — layout adapts without horizontal scrolling.
+- [ ] 1366 px — full layout renders correctly.
 - [ ] No overlapping text, cut-off buttons, or unusable modals.
 - [ ] Touch targets are large enough on mobile.
 - [ ] Dashboard tables/cards scroll or stack correctly.
@@ -387,7 +396,7 @@ Repeat after every deployment.
 - [ ] `render.yaml` and `vercel.json` contain no secret values.
 - [ ] `.gitignore` excludes `.env`, `.env.*`, logs, uploads, build output, and the generated Prisma client.
 - [ ] `JWT_SECRET` is long and random.
-- [ ] The production admin password is not the default `Admin@123`.
+- [ ] The admin was bootstrapped from a unique `ADMIN_PASSWORD`; no default admin credential is present.
 - [ ] Resend and UploadThing keys are only in Render.
 - [ ] CORS allows only the real frontend origins and this project's own Vercel preview URLs.
 - [ ] `OPTIONS /api/services` returns `204` with `Access-Control-Allow-Origin` for each allowed frontend origin.
