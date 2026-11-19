@@ -33,7 +33,11 @@ function printConfig(config) {
   console.log(`  app id            : ${config.appId || "(not set)"}`);
   console.log(`  region            : ${config.region || "(not set)"}`);
   console.log(`  max image size    : ${Math.round(config.maxBytes / (1024 * 1024))} MB`);
-  if (!config.enabled) console.log(`  issue             : ${config.error}`);
+  console.log(`  token issue       : ${config.tokenIssue || "none"}`);
+  if (config.normalizations?.length) {
+    console.log(`  safe normalization: ${config.normalizations.join("; ")}`);
+  }
+  console.log(`  diagnostic        : ${config.diagnostic}`);
 }
 
 async function main() {

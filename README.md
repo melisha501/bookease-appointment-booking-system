@@ -246,10 +246,10 @@ Never commit real credentials. All backend secrets belong in `backend/.env` loca
 | `EMAIL_OUTBOX_BASE_DELAY_MS` | No | First retry delay in ms (default 60000) | `60000` |
 | `EMAIL_OUTBOX_MAX_DELAY_MS` | No | Maximum retry delay in ms (default 1 hour) | `3600000` |
 | `EMAIL_OUTBOX_STUCK_AFTER_MS` | No | Re-queue `sending` rows older than this (default 5 min) | `300000` |
-| `UPLOADTHING_TOKEN` | For images | UploadThing v7 token | `...` |
-| `UPLOADTHING_SECRET` | Alternative | Legacy UploadThing secret | `...` |
-| `UPLOADTHING_APP_ID` | Alternative | Legacy UploadThing app ID | `...` |
-| `UPLOADTHING_REGION` | No | Legacy pair region | `sea1` |
+| `UPLOADTHING_TOKEN` | For images | Complete UploadThing v7 token; backend-only | `...` |
+| `UPLOADTHING_SECRET` | No | Legacy v6 variable; ignored by the v7 SDK | — |
+| `UPLOADTHING_APP_ID` | No | Legacy v6 variable; ignored by the v7 SDK | — |
+| `UPLOADTHING_REGION` | No | Legacy v6 variable; ignored by the v7 SDK | — |
 
 Generate a safe JWT secret:
 
@@ -556,24 +556,23 @@ The script prints Resend message IDs and never prints the API key.
 
 Admin service images and provider photos are uploaded by the backend to UploadThing. Only the returned HTTPS URL is stored in PostgreSQL (`Service.imageUrl` and `Specialist.imageUrl`). There is no Base64 or local-disk fallback.
 
-Configure one credential style in `backend/.env`:
+Configure exactly one credential in `backend/.env` (and in Render for production):
 
 ```dotenv
-# Preferred for uploadthing v7
-UPLOADTHING_TOKEN="your_uploadthing_token"
-
-# Or the legacy pair
-UPLOADTHING_SECRET="your_uploadthing_secret"
-UPLOADTHING_APP_ID="your_uploadthing_app_id"
-UPLOADTHING_REGION="sea1"
+UPLOADTHING_TOKEN=the_complete_v7_token
 ```
 
-- `UPLOADTHING_TOKEN` takes precedence when present.
+- Use **UploadThing Dashboard → API Keys → V7**. A v6 `UPLOADTHING_SECRET` /
+  `UPLOADTHING_APP_ID` pair is not accepted by the installed SDK.
+- Paste the complete one-line token without quotes or a prefix. The backend also
+  safely tolerates wrapping quotes, line breaks, and URL-safe Base64 characters,
+  but the token itself must be genuine and complete.
 - Credentials are backend-only and never sent to the browser.
 - Accepted formats: JPG, JPEG, PNG, WEBP.
 - Maximum size: 4 MB.
 - The backend checks MIME type, size, and image magic bytes.
-- Missing configuration returns a safe `503`; provider failures return a safe `502`.
+- Missing/invalid configuration returns a safe `503` with a secret-free
+  diagnostic; provider failures return a safe `502`.
 
 Diagnostics:
 

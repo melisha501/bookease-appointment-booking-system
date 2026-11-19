@@ -41,34 +41,145 @@ const INVALID_TOKEN_MESSAGE =
   "UPLOADTHING_TOKEN is not a valid UploadThing v7 token. Copy the complete token from UploadThing Dashboard -> API Keys -> V7 (do not use a v6 secret), then restart/redeploy the backend.";
 const CONFIG_ERROR_CODES = new Set(["INVALID_SERVER_CONFIG", "MISSING_ENV"]);
 
-function trimmedEnv(name) {
-  const value = process.env[name];
-  return value == null ? "" : String(value).trim();
+const TOKEN_ISSUE_MESSAGES = {
+  missing: TOKEN_SETUP_MESSAGE,
+  "legacy-v6-secret":
+    "UPLOADTHING_TOKEN contains a legacy v6 secret (sk_...). Open UploadThing Dashboard -> API Keys -> V7 and copy the complete V7 token instead.",
+  "malformed-base64":
+    "UPLOADTHING_TOKEN is not complete Base64. Copy the entire one-line V7 token and paste it without quotes, prefixes, or line breaks.",
+  "not-json":
+    "UPLOADTHING_TOKEN decoded to something other than JSON, so it is not an UploadThing V7 token.",
+  "invalid-shape":
+    "UPLOADTHING_TOKEN decoded to JSON, but it does not have the V7 fields apiKey, appId, and regions.",
+  "invalid-api-key":
+    "UPLOADTHING_TOKEN decoded to JSON, but apiKey is missing or is not a v7 key beginning with sk_.",
+  "invalid-app-id":
+    "UPLOADTHING_TOKEN decoded to JSON, but appId is missing or empty.",
+  "invalid-regions":
+    "UPLOADTHING_TOKEN decoded to JSON, but regions is missing or empty. Copy the complete token again.",
+};
+
+// Remove only transport artifacts (wrapping quotes, whitespace, escaped line
+// breaks, and Base64URL representation). The decoded credential itself is never
+// reconstructed or changed: a normal dashboard token comes back byte-for-byte.
+function normalizeTokenValue(raw) {
+  let token = raw == null ? "" : String(raw);
+  const normalizations = [];
+
+  const trimmed = token.trim();
+  if (trimmed && trimmed !== token) normalizations.push("outer whitespace removed");
+  token = trimmed;
+
+  if (
+    token.length >= 2 &&
+    ((token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'")))
+  ) {
+    token = token.slice(1, -1).trim();
+    normalizations.push("surrounding quotes removed");
+  }
+
+  if (token.includes("\\r") || token.includes("\\n")) {
+    token = token.replace(/\\r/g, "").replace(/\\n/g, "");
+    normalizations.push("escaped line breaks removed");
+  }
+
+  if (/\s/.test(token)) {
+    token = token.replace(/\s+/g, "");
+    normalizations.push("embedded whitespace removed");
+  }
+
+  // A raw v6 secret is a plain-text credential string, not a v7 token. Detect
+  // it before any Base64URL conversion so underscores in secrets are preserved
+  // for the diagnostic and the secret is never decoded/passed to the SDK.
+  const rawLegacySecret = /^sk_/i.test(token);
+
+  // UploadThing v7's SDK decodes standard Base64 only. A token copied from a
+  // URL-safe source can still be used by converting the representation, not
+  // by inventing any credential data.
+  if (!rawLegacySecret && /^[A-Za-z0-9_-]+={0,2}$/.test(token) && /[-_]/.test(token)) {
+    token = token.replace(/-/g, "+").replace(/_/g, "/");
+    normalizations.push("Base64URL representation converted to standard Base64");
+  }
+
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(token) && token.length % 4 !== 0) {
+    token += "=".repeat(4 - (token.length % 4));
+    normalizations.push("Base64 padding restored");
+  }
+
+  return { token, normalizations };
 }
 
-// Validates the token shape required by uploadthing v7's own config schema:
-// base64(JSON({ apiKey: "sk_...", appId: string, regions: [string, ...] })).
-function decodeToken(token) {
-  if (!token) return null;
+// Canonical standard Base64, matching the SDK's Uint8ArrayFromBase64 schema.
+const STANDARD_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function decodeBase64Json(token) {
+  if (!STANDARD_BASE64.test(token)) return null;
   try {
-    const json = Buffer.from(token, "base64").toString("utf8");
-    const parsed = JSON.parse(json);
-    if (
-      parsed &&
-      typeof parsed.apiKey === "string" &&
-      parsed.apiKey.startsWith("sk_") &&
-      typeof parsed.appId === "string" &&
-      parsed.appId.trim() &&
-      Array.isArray(parsed.regions) &&
-      parsed.regions.length > 0 &&
-      parsed.regions.every((region) => typeof region === "string" && region.trim())
-    ) {
-      return parsed;
-    }
+    return JSON.parse(Buffer.from(token, "base64").toString("utf8"));
   } catch (_err) {
-    // Invalid token shape; caller returns a safe configuration error.
+    return null;
   }
-  return null;
+}
+
+function tokenDiagnostic(issue, normalizations) {
+  const base = TOKEN_ISSUE_MESSAGES[issue] || INVALID_TOKEN_MESSAGE;
+  if (!normalizations.length) return base;
+  return `${base} Safe normalization applied before validation: ${normalizations.join("; ")}.`;
+}
+
+// Validates the exact shape required by uploadthing v7's own config schema:
+// base64(JSON({ apiKey: "sk_...", appId: string, regions: [string, ...] })).
+function analyzeToken(raw) {
+  const { token, normalizations } = normalizeTokenValue(raw);
+  const result = { token, decoded: null, issue: "", normalizations, diagnostic: "" };
+
+  if (!token) {
+    result.issue = "missing";
+    result.diagnostic = tokenDiagnostic("missing", normalizations);
+    return result;
+  }
+
+  // A raw v6 secret is the most common wrong value. Never pass it to the SDK.
+  if (/^sk_/i.test(token)) {
+    result.issue = "legacy-v6-secret";
+    // Keep the diagnostic secret-free: report the class of mistake only.
+    result.normalizations = normalizations.filter(
+      (n) => n !== "Base64URL representation converted to standard Base64" && n !== "Base64 padding restored"
+    );
+    result.diagnostic = tokenDiagnostic("legacy-v6-secret", result.normalizations);
+    return result;
+  }
+
+  const parsed = decodeBase64Json(token);
+  if (parsed === null) {
+    result.issue = /^[A-Za-z0-9+/]+={0,2}$/.test(token) ? "not-json" : "malformed-base64";
+    result.diagnostic = tokenDiagnostic(result.issue, normalizations);
+    return result;
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    result.issue = "invalid-shape";
+  } else if (typeof parsed.apiKey !== "string" || !parsed.apiKey.startsWith("sk_")) {
+    result.issue = "invalid-api-key";
+  } else if (typeof parsed.appId !== "string" || !parsed.appId.trim()) {
+    result.issue = "invalid-app-id";
+  } else if (
+    !Array.isArray(parsed.regions) ||
+    parsed.regions.length === 0 ||
+    !parsed.regions.every((region) => typeof region === "string" && region.trim())
+  ) {
+    result.issue = "invalid-regions";
+  } else {
+    result.decoded = parsed;
+    result.diagnostic = normalizations.length
+      ? `Valid V7 token. Safe normalization applied: ${normalizations.join("; ")}.`
+      : "Valid V7 token.";
+    return result;
+  }
+
+  result.diagnostic = tokenDiagnostic(result.issue, normalizations);
+  return result;
 }
 
 function isUploadThingConfigError(err) {
@@ -82,14 +193,13 @@ function getUploadThingConfig() {
   // Exactly one source of truth: the v7 token issued by UploadThing. Legacy
   // v6 variables are intentionally ignored so an old secret can never be used
   // as a v7 token.
-  const token = trimmedEnv("UPLOADTHING_TOKEN");
-  const decoded = decodeToken(token);
+  const analysis = analyzeToken(process.env.UPLOADTHING_TOKEN);
+  const { token, decoded } = analysis;
   const sdkAvailable = Boolean(UTApi && UTFile);
   const configured = Boolean(token);
 
   let error = "";
-  if (!configured) error = TOKEN_SETUP_MESSAGE;
-  else if (!decoded) error = INVALID_TOKEN_MESSAGE;
+  if (!configured || !decoded) error = analysis.diagnostic;
   else if (!sdkAvailable) error = "The UploadThing server SDK is not available. Run npm install in the backend.";
 
   return {
@@ -100,11 +210,21 @@ function getUploadThingConfig() {
     enabled: Boolean(configured && decoded && sdkAvailable),
     sdkAvailable,
     error,
+    tokenIssue: analysis.issue,
+    normalizations: analysis.normalizations,
+    diagnostic: error || analysis.diagnostic,
     appId: decoded?.appId || null,
     region: decoded?.regions?.[0] || null,
     maxBytes: DEFAULT_MAX_IMAGE_BYTES,
     allowedMimeTypes: ALLOWED_IMAGE_MIME_TYPES,
   };
+}
+
+// Logs only a safe, secret-free explanation of a configuration problem.
+function logConfigurationIssue(config, context) {
+  if (config.configured && !config.enabled && config.diagnostic) {
+    console.error(`[upload] ${context}: ${config.diagnostic}`);
+  }
 }
 
 function hasValidMagicBytes(buffer, mimetype) {
@@ -321,9 +441,11 @@ async function deleteImageFromUploadThing(imageUrl) {
 
   const config = getUploadThingConfig();
   if (!config.enabled) {
+    logConfigurationIssue(config, "image deletion unavailable");
     return {
       ok: false,
       status: 503,
+      code: config.tokenIssue || "UPLOADTHING_SDK_MISSING",
       deleted: false,
       key: parsed.key,
       message: `Image deletion is unavailable: ${config.error}`,
@@ -403,7 +525,13 @@ async function uploadImage(file) {
   if (!config.enabled) {
     // Missing/invalid v7 token and a missing SDK are backend configuration
     // problems. They must never be reported as a failed upload (502).
-    return { ok: false, status: 503, message: `Image uploads are unavailable: ${config.error}` };
+    logConfigurationIssue(config, "image upload unavailable");
+    return {
+      ok: false,
+      status: 503,
+      code: config.tokenIssue || "UPLOADTHING_SDK_MISSING",
+      message: `Image uploads are unavailable: ${config.error}`,
+    };
   }
 
   try {

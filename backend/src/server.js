@@ -6,6 +6,7 @@ require("dotenv").config();
 
 const app = require("./app");
 const emailOutbox = require("./services/emailOutboxService");
+const { getUploadThingConfig } = require("./services/uploadthingService");
 
 const PORT = Number(process.env.PORT || 5000);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -13,6 +14,18 @@ const HOST = process.env.HOST || "0.0.0.0";
 const server = app.listen(PORT, HOST, () => {
   console.log(`Backend running at http://${HOST}:${PORT} (local: http://localhost:${PORT})`);
   console.log(`Health check:     http://localhost:${PORT}/api/health`);
+
+  // Report upload configuration at startup with no token contents in logs.
+  const uploadConfig = getUploadThingConfig();
+  if (uploadConfig.enabled) {
+    console.log(
+      `[upload] UploadThing configured (app: ${uploadConfig.appId || "unknown"}, region: ${
+        uploadConfig.region || "unknown"
+      }).`
+    );
+  } else {
+    console.error(`[upload] UploadThing configuration problem: ${uploadConfig.diagnostic}`);
+  }
   // Retries pending/failed-schedule emails in the background without blocking
   // requests. Safe to run in a single instance; rows are claimed atomically.
   emailOutbox.startWorker();

@@ -183,25 +183,130 @@ test("an invalid v7 token is a 503 configuration error and never reaches the SDK
     const result = await rawSecret.uploadImageToUploadThing(file());
     assert.equal(result.ok, false);
     assert.equal(result.status, 503);
-    assert.match(result.message, /v7 token/i);
+    assert.match(result.message, /legacy v6 secret/i);
+    assert.match(result.message, /API Keys -> V7/i);
     assert.equal(called, false);
   } finally {
     rawSecret.restore();
   }
 
   // Base64 JSON with an apiKey that does not match the v7 SDK schema.
-  const badShape = loadUploadService({
+  const badApiKey = loadUploadService({
     uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
     env: { UPLOADTHING_TOKEN: v7Token("re_not_an_uploadthing_key", "ut_app_test", []) },
   });
   try {
-    const result = await badShape.uploadImageToUploadThing(file());
+    const result = await badApiKey.uploadImageToUploadThing(file());
     assert.equal(result.ok, false);
     assert.equal(result.status, 503);
-    assert.match(result.message, /v7 token/i);
+    assert.match(result.message, /apiKey/i);
     assert.equal(called, false);
   } finally {
-    badShape.restore();
+    badApiKey.restore();
+  }
+});
+
+test("valid v7 tokens with safe transport artifacts are accepted without changing credentials", async () => {
+  let seen;
+  class UTFileMock {
+    constructor(parts, name, opts) {
+      this.name = name;
+      this.type = opts?.type;
+    }
+  }
+  class UTApiMock {
+    constructor(opts) {
+      this.opts = opts;
+    }
+    async uploadFiles(f) {
+      seen = { f, token: this.opts.token };
+      return { data: { ufsUrl: "https://app.ufs.sh/f/test-key.png", key: "test-key" }, error: null };
+    }
+  }
+
+  const token = v7Token("sk_test_key", "ut_app_test", ["lhr1"]);
+
+  const base64UrlInput = Buffer.from(
+    JSON.stringify({ apiKey: "sk_test_key", appId: "ut_app_test", regions: ["lhr1"] }),
+    "utf8"
+  ).toString("base64url");
+  const base64UrlExpected = Buffer.from(base64UrlInput, "base64url").toString("base64");
+
+  const cases = [
+    { input: `"${token}"`, expectedToken: token, normalization: "surrounding quotes removed" },
+    { input: `  \n${token}\r\n  `, expectedToken: token, normalization: "outer whitespace removed" },
+    {
+      input: `${token.slice(0, 20)}\\n${token.slice(20)}`,
+      expectedToken: token,
+      normalization: "escaped line breaks removed",
+    },
+    {
+      input: base64UrlInput,
+      expectedToken: base64UrlExpected,
+      normalizations: [
+        "Base64URL representation converted to standard Base64",
+        "Base64 padding restored",
+      ],
+    },
+  ];
+
+  for (const { input, expectedToken, normalization, normalizations } of cases) {
+    seen = undefined;
+    const svc = loadUploadService({
+      uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
+      env: { UPLOADTHING_TOKEN: input },
+    });
+    try {
+      const config = svc.getUploadThingConfig();
+      assert.equal(config.enabled, true, `expected enabled for ${expectedToken.slice(0, 8)}...`);
+      assert.equal(config.token, expectedToken, "token must be normalized, not reconstructed");
+      if (normalization) {
+        assert.ok(config.normalizations.includes(normalization), config.normalizations.join(", "));
+      } else {
+        assert.ok(
+          normalizations.some((name) => config.normalizations.includes(name)),
+          config.normalizations.join(", ")
+        );
+      }
+
+      const result = await svc.uploadImageToUploadThing(file({ originalname: "a.png" }));
+      assert.equal(result.ok, true);
+      assert.equal(seen.token, expectedToken);
+    } finally {
+      svc.restore();
+    }
+  }
+});
+
+test("malformed v7 token values produce a safe, specific 503 diagnostic", async () => {
+  class UTFileMock {}
+  class UTApiMock {
+    async uploadFiles() {
+      throw new Error("should not call");
+    }
+  }
+
+  const cases = [
+    ["not-a-token", /complete Base64|other than JSON/i],
+    [Buffer.from("not-json", "utf8").toString("base64"), /other than JSON/i],
+    [v7Token("sk_test_key", "", ["sea1"]), /appId/i],
+    [v7Token("sk_test_key", "ut_app_test", []), /regions/i],
+  ];
+
+  for (const [token, message] of cases) {
+    const svc = loadUploadService({
+      uploadthingServerModule: { UTApi: UTApiMock, UTFile: UTFileMock },
+      env: { UPLOADTHING_TOKEN: token },
+    });
+    try {
+      const result = await svc.uploadImageToUploadThing(file());
+      assert.equal(result.ok, false);
+      assert.equal(result.status, 503);
+      assert.match(result.message, message);
+      assert.doesNotMatch(result.message, /sk_test_key/);
+    } finally {
+      svc.restore();
+    }
   }
 });
 
@@ -342,6 +447,8 @@ test("getUploadThingConfig reports v7 token status without exposing the token", 
     assert.equal(config.source, "token");
     assert.equal(config.appId, "ut_app_test");
     assert.equal(config.region, "lhr1");
+    assert.equal(config.tokenIssue, "");
+    assert.deepEqual(config.normalizations, []);
     assert.ok(config.token);
     assert.equal(Object.prototype.hasOwnProperty.call(config, "apiKey"), false);
   } finally {
